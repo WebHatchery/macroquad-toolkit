@@ -393,8 +393,7 @@ mod tests {
 
     #[test]
     fn strips_report_stopping_once_each_in_order() {
-        let mut spinner =
-            StripSpinner::new(&[40; 5], &[0; 5], &[5; 5], 1.0, &[false; 5], &feel());
+        let mut spinner = StripSpinner::new(&[40; 5], &[0; 5], &[5; 5], 1.0, &[false; 5], &feel());
         let mut order = Vec::new();
         for _ in 0..900 {
             order.extend(spinner.tick(1.0 / 60.0));

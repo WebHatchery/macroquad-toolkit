@@ -57,13 +57,14 @@ pub mod events;
 pub mod fx;
 pub mod input;
 pub mod math;
+pub mod paint;
 pub mod raster;
 pub mod rng;
 pub mod settings;
 pub mod sprite;
-pub mod synth;
 pub mod states;
 pub mod strip;
+pub mod synth;
 pub mod timing;
 pub mod ui;
 

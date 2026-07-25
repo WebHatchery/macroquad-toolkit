@@ -26,7 +26,11 @@ impl SeededRng {
         // one case leaves every other seed's stream byte-identical, so no
         // existing game's determinism moves.
         Self {
-            state: if init == 0 { 0xDEAD_BEEF_CAFE_F00D } else { init },
+            state: if init == 0 {
+                0xDEAD_BEEF_CAFE_F00D
+            } else {
+                init
+            },
         }
     }
 
