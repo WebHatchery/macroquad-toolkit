@@ -61,6 +61,7 @@ pub mod paint;
 pub mod raster;
 pub mod rng;
 pub mod score;
+pub mod series;
 pub mod settings;
 pub mod sprite;
 pub mod states;
