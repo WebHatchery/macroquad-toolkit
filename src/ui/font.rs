@@ -125,11 +125,14 @@ pub fn draw_ui_text_ex<'a>(
     // being marked — which is itself a finding.
     let swapped = super::pseudo::apply(text);
     let text = swapped.as_deref().unwrap_or(text);
+    // Read before the params are handed over, since drawing consumes them.
+    let (color, size) = (params.color, params.font_size as f32);
     let drawn = macroquad::prelude::draw_text_ex(text, x, y, params);
     // What it measured, against what the enclosing region had. Free unless an
     // audit is running (see `ui::bounds`).
     if super::bounds::auditing() {
         super::bounds::note(text, x, drawn.width);
+        super::bounds::note_contrast(text, color, size);
     }
     drawn
 }
@@ -585,16 +588,19 @@ pub fn draw_text_block_ex(
     let line_gap = style.effective_line_gap();
     let mut line_y = y + draw_font_size;
     for line in &layout.lines {
-        draw_text_ex(
-            line,
-            x,
-            line_y,
-            TextStyle {
-                font_size: layout.font_size,
-                ..style
-            }
-            .params(),
-        );
+        let params = TextStyle {
+            font_size: layout.font_size,
+            ..style
+        }
+        .params();
+        let drawn = draw_text_ex(line, x, line_y, params);
+        // These lines go straight to macroquad rather than through
+        // `draw_ui_text_ex`, so they have to report themselves or a whole class
+        // of the game's prose would be outside the audit (§5.37, §5.40).
+        if super::bounds::auditing() {
+            super::bounds::note(line, x, drawn.width);
+            super::bounds::note_contrast(line, style.color, effective_font_size(layout.font_size));
+        }
         line_y += draw_font_size + line_gap;
     }
     layout
@@ -649,6 +655,10 @@ pub fn draw_text_centered_in_box_ex(
             }
             .params(),
         );
+        if super::bounds::auditing() {
+            super::bounds::note(line, line_x, line_width);
+            super::bounds::note_contrast(line, style.color, draw_font_size);
+        }
         line_y += draw_font_size + line_gap;
     }
 

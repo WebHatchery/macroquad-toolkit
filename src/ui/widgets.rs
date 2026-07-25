@@ -599,6 +599,7 @@ pub fn meter(rect: Rect, value: f32, max: f32, fill: Color, label: Option<&str>)
         // unreadable, so stroke the label with a dark outline first — it keeps
         // contrast over both the bright fill and the dark empty track.
         let outline = Color::new(0.0, 0.0, 0.0, 0.75);
+        let _stroke = super::bounds::Decorative::new();
         for (dx, dy) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
             draw_text_centered_in_box(
                 label,
@@ -610,6 +611,7 @@ pub fn meter(rect: Rect, value: f32, max: f32, fill: Color, label: Option<&str>)
                 outline,
             );
         }
+        drop(_stroke);
         draw_text_centered_in_box(
             label,
             rect.x + 4.0,

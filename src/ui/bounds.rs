@@ -35,31 +35,70 @@
 use macroquad::prelude::*;
 use std::cell::RefCell;
 
-/// One piece of text that did not fit where it was drawn.
+/// Something wrong with a piece of text where it was drawn.
 #[derive(Debug, Clone, PartialEq)]
-pub struct Overflow {
-    pub text: String,
-    /// How wide the text measured.
-    pub needed: f32,
-    /// How much room it had from its position to the edge of its region.
-    pub available: f32,
+pub enum Finding {
+    /// It ran past the edge of its region.
+    Overflow {
+        text: String,
+        needed: f32,
+        available: f32,
+    },
+    /// It cannot be read off what it was drawn on (see `ui::contrast`).
+    LowContrast {
+        text: String,
+        ratio: f32,
+        required: f32,
+        font_size: f32,
+    },
 }
 
-impl Overflow {
-    pub fn excess(&self) -> f32 {
-        self.needed - self.available
+impl Finding {
+    pub fn text(&self) -> &str {
+        match self {
+            Finding::Overflow { text, .. } | Finding::LowContrast { text, .. } => text,
+        }
     }
+
+    /// A one-line description, for a report.
+    pub fn describe(&self) -> String {
+        match self {
+            Finding::Overflow {
+                needed, available, ..
+            } => format!("{:.0}px past the edge", needed - available),
+            Finding::LowContrast {
+                ratio,
+                required,
+                font_size,
+                ..
+            } => format!(
+                "contrast {:.1}:1 against {:.1} needed at {:.0}px",
+                ratio, required, font_size
+            ),
+        }
+    }
+}
+
+/// A bounded area, and what is behind it.
+#[derive(Debug, Clone, Copy)]
+struct Bounds {
+    rect: Rect,
+    /// What text drawn here sits on. `None` where the caller did not say, in
+    /// which case contrast cannot be judged and is not guessed at.
+    behind: Option<Color>,
 }
 
 #[derive(Default)]
 struct State {
-    stack: Vec<Rect>,
+    stack: Vec<Bounds>,
     auditing: bool,
-    overflows: Vec<Overflow>,
+    findings: Vec<Finding>,
 }
 
 thread_local! {
     static STATE: RefCell<State> = RefCell::new(State::default());
+    /// Nesting depth of [`Decorative`]; contrast is skipped above zero.
+    static DECORATIVE: RefCell<u32> = const { RefCell::new(0) };
 }
 
 /// Bounds that text drawn inside them is measured against.
@@ -73,15 +112,32 @@ pub struct Region {
 }
 
 impl Region {
+    /// Bounds only. Text drawn here is measured for fit but not for contrast,
+    /// because nothing has said what it sits on.
     pub fn new(rect: Rect) -> Self {
-        STATE.with(|state| state.borrow_mut().stack.push(rect));
+        Self::push(rect, None)
+    }
+
+    /// Bounds and the surface behind them, so text is checked for both fit and
+    /// legibility (`ui::contrast`).
+    pub fn on(rect: Rect, behind: Color) -> Self {
+        Self::push(rect, Some(behind))
+    }
+
+    fn push(rect: Rect, behind: Option<Color>) -> Self {
+        STATE.with(|state| state.borrow_mut().stack.push(Bounds { rect, behind }));
         Self { _private: () }
     }
 
     /// A region inset from the current one, for a row or a column inside a
-    /// panel. Falls back to `rect` when there is nothing to inset from.
+    /// panel. Inherits the surface unless told otherwise, since a row inside a
+    /// panel sits on the panel.
     pub fn inset(rect: Rect) -> Self {
-        Self::new(current().map_or(rect, |outer| intersect(outer, rect)))
+        let outer = STATE.with(|state| state.borrow().stack.last().copied());
+        match outer {
+            Some(outer) => Self::push(intersect(outer.rect, rect), outer.behind),
+            None => Self::push(rect, None),
+        }
     }
 }
 
@@ -104,9 +160,14 @@ fn intersect(a: Rect, b: Rect) -> Rect {
     )
 }
 
-/// The innermost region, if any.
+/// The innermost region's bounds, if any.
 pub fn current() -> Option<Rect> {
-    STATE.with(|state| state.borrow().stack.last().copied())
+    STATE.with(|state| state.borrow().stack.last().map(|bounds| bounds.rect))
+}
+
+/// What the innermost region sits on, if it said.
+pub fn current_surface() -> Option<Color> {
+    STATE.with(|state| state.borrow().stack.last().and_then(|bounds| bounds.behind))
 }
 
 /// Start recording. Clears anything already recorded.
@@ -114,17 +175,28 @@ pub fn begin_audit() {
     STATE.with(|state| {
         let mut state = state.borrow_mut();
         state.auditing = true;
-        state.overflows.clear();
+        state.findings.clear();
     });
 }
 
 /// Stop recording and take what was found.
-pub fn take_audit() -> Vec<Overflow> {
+pub fn take_audit() -> Vec<Finding> {
     STATE.with(|state| {
         let mut state = state.borrow_mut();
         state.auditing = false;
-        std::mem::take(&mut state.overflows)
+        std::mem::take(&mut state.findings)
     })
+}
+
+fn record(finding: Finding) {
+    STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        // The audit runs while the game is drawing, which redraws everything
+        // sixty times a second.
+        if !state.findings.contains(&finding) {
+            state.findings.push(finding);
+        }
+    });
 }
 
 pub fn auditing() -> bool {
@@ -144,20 +216,75 @@ pub fn note(text: &str, x: f32, width: f32) {
         let Some(region) = state.stack.last().copied() else {
             return;
         };
-        let available = region.right() - x;
+        let available = region.rect.right() - x;
         // A hair over is rounding, not a defect. Anything a reader would notice
         // is at least a character wide.
         if width > available + 2.0 {
-            let overflow = Overflow {
+            let finding = Finding::Overflow {
                 text: text.to_owned(),
                 needed: width,
                 available,
             };
-            if !state.overflows.contains(&overflow) {
-                state.overflows.push(overflow);
+            if !state.findings.contains(&finding) {
+                state.findings.push(finding);
             }
         }
     });
+}
+
+/// Marks draws that are not meant to be read.
+///
+/// A text outline — the same string drawn four times in near-black behind a
+/// light label, to keep it legible over a bright fill — is deliberately
+/// invisible against a dark panel, and reporting it as low contrast is reporting
+/// the fix as the fault. Anything held under this is skipped for contrast.
+///
+/// Not for turning off an inconvenient finding. It says *this is a stroke, not a
+/// word*, and the only things that should hold it are the ones drawing twice.
+pub struct Decorative {
+    _private: (),
+}
+
+impl Decorative {
+    pub fn new() -> Self {
+        DECORATIVE.with(|depth| *depth.borrow_mut() += 1);
+        Self { _private: () }
+    }
+}
+
+impl Default for Decorative {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Drop for Decorative {
+    fn drop(&mut self) {
+        DECORATIVE.with(|depth| *depth.borrow_mut() -= 1);
+    }
+}
+
+/// Note the colour and size a piece of text was drawn at.
+///
+/// Separate from [`note`] because a caller may know one and not the other, and
+/// because contrast is only judged where a region has said what is behind it.
+pub fn note_contrast(text: &str, color: Color, font_size: f32) {
+    if !auditing() || DECORATIVE.with(|depth| *depth.borrow()) > 0 {
+        return;
+    }
+    let Some(behind) = current_surface() else {
+        return;
+    };
+    let ratio = super::contrast::ratio(color, behind);
+    let required = super::contrast::Level::for_size(font_size).ratio();
+    if ratio < required {
+        record(Finding::LowContrast {
+            text: text.to_owned(),
+            ratio,
+            required,
+            font_size,
+        });
+    }
 }
 
 #[cfg(test)]
@@ -194,9 +321,19 @@ mod tests {
         }
         let found = take_audit();
         assert_eq!(found.len(), 1);
-        assert_eq!(found[0].text, "a long line");
-        assert!((found[0].available - 390.0).abs() < 1e-3);
-        assert!((found[0].excess() - 110.0).abs() < 1e-3);
+        let Finding::Overflow {
+            text, available, ..
+        } = &found[0]
+        else {
+            panic!("expected an overflow, got {:?}", found[0]);
+        };
+        assert_eq!(text, "a long line");
+        assert!((available - 390.0).abs() < 1e-3);
+        assert!(
+            found[0].describe().contains("110px"),
+            "{}",
+            found[0].describe()
+        );
     }
 
     #[test]
@@ -204,6 +341,41 @@ mod tests {
         begin_audit();
         let _region = Region::new(panel());
         note("just about", 110.0, 391.0);
+        assert!(take_audit().is_empty());
+    }
+
+    #[test]
+    fn a_decorative_draw_is_not_judged_on_contrast() {
+        // An outline is deliberately invisible against a dark panel. Reporting
+        // it would be reporting the fix as the fault.
+        begin_audit();
+        let _region = Region::on(panel(), Color::new(0.07, 0.06, 0.07, 1.0));
+        {
+            let _stroke = Decorative::new();
+            note_contrast("outlined", Color::new(0.0, 0.0, 0.0, 0.75), 14.0);
+        }
+        assert!(take_audit().is_empty());
+    }
+
+    #[test]
+    fn the_label_itself_is_still_judged() {
+        // The guard covers the stroke and nothing after it.
+        begin_audit();
+        let _region = Region::on(panel(), Color::new(0.07, 0.06, 0.07, 1.0));
+        {
+            let _stroke = Decorative::new();
+            note_contrast("outlined", Color::new(0.0, 0.0, 0.0, 0.75), 14.0);
+        }
+        note_contrast("label", Color::new(0.10, 0.09, 0.10, 1.0), 14.0);
+        assert_eq!(take_audit().len(), 1);
+    }
+
+    #[test]
+    fn contrast_is_not_judged_where_no_surface_was_declared() {
+        // `Region::new` says where, not what on. Guessing would invent findings.
+        begin_audit();
+        let _region = Region::new(panel());
+        note_contrast("anything", Color::new(0.1, 0.1, 0.1, 1.0), 14.0);
         assert!(take_audit().is_empty());
     }
 
@@ -228,7 +400,7 @@ mod tests {
 
         let found = take_audit();
         assert_eq!(found.len(), 1, "{:?}", found);
-        assert_eq!(found[0].text, "inside the column");
+        assert_eq!(found[0].text(), "inside the column");
     }
 
     #[test]
