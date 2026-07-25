@@ -18,35 +18,60 @@ use crate::ui::{draw_surface, draw_text_centered_in_box_ex, RectExt, SurfaceStyl
 /// [`update`](Self::update) each frame with the region's rect and total
 /// content height, offset your row drawing by [`offset`](Self::offset),
 /// then call [`draw_scrollbar`](Self::draw_scrollbar) after the rows.
-#[derive(Debug, Clone, Copy, Default)]
+///
+/// The rendered [`offset`](Self::offset) eases toward the wheel/drag target each
+/// frame (see [`smoothing`](Self::smoothing)) so the list glides rather than
+/// jumping a notch at a time. Under a [`VirtualUi`](crate::ui::VirtualUi) frame,
+/// call [`update_at`](Self::update_at) with the logical mouse instead of
+/// [`update`](Self::update), which reads the raw window mouse.
+#[derive(Debug, Clone, Copy)]
 pub struct ScrollArea {
+    /// Rendered (eased) offset — what callers subtract from their content's y.
     offset: f32,
+    /// Offset the wheel/drag drives; `offset` chases it. Equal once settled.
+    target: f32,
     dragging: bool,
     /// Pixels scrolled per wheel notch.
     pub wheel_speed: f32,
     /// Width of the scrollbar drawn at the region's right edge.
     pub bar_width: f32,
+    /// Exponential approach rate of `offset` toward its target, in 1/seconds:
+    /// higher settles faster, `0.0` disables easing (the offset jumps instantly,
+    /// the pre-smoothing behavior). The default (18.0) gives a quick, soft glide.
+    pub smoothing: f32,
+}
+
+impl Default for ScrollArea {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl ScrollArea {
-    /// Creates a scroll area with default wheel speed (40px) and bar width (8px).
+    /// Creates a scroll area with default wheel speed (40px), bar width (8px),
+    /// and smoothing (18/s).
     pub fn new() -> Self {
         Self {
             offset: 0.0,
+            target: 0.0,
             dragging: false,
             wheel_speed: 40.0,
             bar_width: 8.0,
+            smoothing: 18.0,
         }
     }
 
-    /// Current scroll offset in pixels (subtract from your content's y).
+    /// Current rendered scroll offset in pixels (subtract from your content's y).
+    /// Eases toward the wheel/drag target when [`smoothing`](Self::smoothing) > 0.
     pub fn offset(&self) -> f32 {
         self.offset
     }
 
-    /// Jumps to a specific offset (clamped on next update).
+    /// Jumps to a specific offset (clamped on next update), settling the easing
+    /// there so it does not glide back.
     pub fn set_offset(&mut self, offset: f32) {
         self.offset = offset.max(0.0);
+        self.target = self.offset;
     }
 
     /// The largest valid offset for the given view/content heights.
@@ -54,21 +79,30 @@ impl ScrollArea {
         (content_height - view.h).max(0.0)
     }
 
-    /// Handles wheel scrolling while hovered and scrollbar dragging, then
-    /// clamps the offset. Call once per frame before drawing content.
+    /// Handles wheel scrolling while hovered and scrollbar dragging, then eases
+    /// and clamps the offset. Call once per frame before drawing content. Uses
+    /// the raw window mouse — inside a [`VirtualUi`](crate::ui::VirtualUi) frame
+    /// use [`update_at`](Self::update_at) with the logical mouse instead.
     pub fn update(&mut self, view: Rect, content_height: f32) {
+        self.update_at(view, content_height, Vec2::from(mouse_position()));
+    }
+
+    /// Like [`update`](Self::update) but hit-tests hover and the scrollbar handle
+    /// against an explicit `mouse` position, so it works inside a
+    /// [`VirtualUi`](crate::ui::VirtualUi) frame (wheel and button state stay
+    /// global — they carry no coordinates).
+    pub fn update_at(&mut self, view: Rect, content_height: f32, mouse: Vec2) {
         let max_offset = Self::max_offset(view, content_height);
 
-        if is_hovered_rect(view) {
+        if view.contains(mouse) {
             let (_, wheel_y) = mouse_wheel();
             if wheel_y != 0.0 {
-                self.offset -= wheel_y.signum() * self.wheel_speed;
+                self.target -= wheel_y.signum() * self.wheel_speed;
             }
         }
 
         if max_offset > 0.0 {
             let track = self.track_rect(view);
-            let mouse = Vec2::from(mouse_position());
             if is_mouse_button_pressed(MouseButton::Left) && track.contains(mouse) {
                 self.dragging = true;
             }
@@ -78,12 +112,24 @@ impl ScrollArea {
             if self.dragging {
                 let handle_h = self.handle_height(view, content_height);
                 let t = ((mouse.y - view.y - handle_h * 0.5) / (view.h - handle_h)).clamp(0.0, 1.0);
-                self.offset = t * max_offset;
+                // Dragging tracks the handle exactly, so settle the easing on it.
+                self.target = t * max_offset;
+                self.offset = self.target;
             }
         } else {
             self.dragging = false;
         }
 
+        self.target = self.target.clamp(0.0, max_offset);
+
+        // Ease the rendered offset toward the target frame-rate-independently.
+        let gap = self.target - self.offset;
+        if self.smoothing > 0.0 && gap.abs() > 0.05 {
+            let dt = get_frame_time().clamp(0.0, 0.05);
+            self.offset += gap * (1.0 - (-self.smoothing * dt).exp());
+        } else {
+            self.offset = self.target;
+        }
         self.offset = self.offset.clamp(0.0, max_offset);
     }
 
