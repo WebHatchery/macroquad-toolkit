@@ -8,6 +8,7 @@ mod hover_tooltip;
 mod layout;
 mod number;
 mod plaque;
+mod pointer;
 mod pseudo;
 mod scroll_tabs;
 mod surfaces;
@@ -26,6 +27,10 @@ pub use hover_tooltip::*;
 pub use layout::*;
 pub use number::*;
 pub use plaque::*;
+pub use pointer::{
+    begin_target_audit, end_target_audit, note_target, overlapping_targets,
+    smallest_touchable_width, touch_area, undersized_targets, Pointer, MIN_TARGET,
+};
 pub use pseudo::{
     active as pseudo_active, disable as pseudo_disable, enable as pseudo_enable,
     Once as PseudoOnce, Pseudo,
