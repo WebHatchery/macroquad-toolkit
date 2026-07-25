@@ -61,6 +61,7 @@ pub mod raster;
 pub mod rng;
 pub mod settings;
 pub mod sprite;
+pub mod synth;
 pub mod states;
 pub mod timing;
 pub mod ui;
