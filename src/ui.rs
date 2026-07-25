@@ -28,8 +28,9 @@ pub use layout::*;
 pub use number::*;
 pub use plaque::*;
 pub use pointer::{
-    begin_target_audit, end_target_audit, note_target, overlapping_targets,
-    smallest_touchable_width, touch_area, undersized_targets, Pointer, MIN_TARGET,
+    begin_target_audit, begin_target_frame, end_frame_neighbours, end_target_audit,
+    neighbours_warm, note_neighbour, note_target, overlapping_targets, smallest_touchable_width,
+    touch_area, touch_area_among, undersized_targets, Pointer, MIN_TARGET,
 };
 pub use pseudo::{
     active as pseudo_active, disable as pseudo_disable, enable as pseudo_enable,

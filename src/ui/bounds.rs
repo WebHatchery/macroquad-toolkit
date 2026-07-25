@@ -160,6 +160,7 @@ impl Region {
             // it — which it does not, because the player cannot see the wager
             // panel at all (§5.47).
             if behind.is_some() {
+                super::pointer::occlude(rect);
                 state.drawn.retain(|d| !rect.contains(d.rect.center()));
             }
             state.stack.push(Bounds { rect, behind });

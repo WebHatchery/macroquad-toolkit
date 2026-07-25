@@ -134,14 +134,95 @@ thread_local! {
 /// than one landing on nothing. [`overlapping_targets`] is what stops that being
 /// silent.
 pub fn touch_area(rect: Rect) -> Rect {
-    let w = rect.w.max(MIN_TARGET);
-    let h = rect.h.max(MIN_TARGET);
+    NEIGHBOURS.with(|slot| touch_area_among(rect, &slot.borrow().last))
+}
+
+/// Grow a control's hit area as far as its neighbours allow.
+///
+/// The unconstrained version was wrong and the audit said so: on a narrow
+/// screen the controls sit closer together, and growing every one to
+/// forty-four made them overlap by thousands of square pixels. **A press
+/// landing on the wrong control is worse than one landing on nothing**, which
+/// was the stated rule from the beginning and was only ever checked at the
+/// design width.
+///
+/// So each side grows at most halfway to whatever is next to it. A control with
+/// room takes the full standard; one in a tight row takes what is going and
+/// stays unambiguous.
+pub fn touch_area_among(rect: Rect, others: &[Rect]) -> Rect {
+    let mut left = ((MIN_TARGET - rect.w) * 0.5).max(0.0);
+    let mut right = left;
+    let mut up = ((MIN_TARGET - rect.h) * 0.5).max(0.0);
+    let mut down = up;
+
+    for other in others {
+        if other.x == rect.x && other.y == rect.y && other.w == rect.w && other.h == rect.h {
+            continue;
+        }
+        // Only neighbours that actually share a band can be run into.
+        let rows_overlap = rect.y < other.bottom() && other.y < rect.bottom();
+        let cols_overlap = rect.x < other.right() && other.x < rect.right();
+
+        if rows_overlap {
+            if other.right() <= rect.x {
+                left = left.min((rect.x - other.right()) * 0.5);
+            }
+            if other.x >= rect.right() {
+                right = right.min((other.x - rect.right()) * 0.5);
+            }
+        }
+        if cols_overlap {
+            if other.bottom() <= rect.y {
+                up = up.min((rect.y - other.bottom()) * 0.5);
+            }
+            if other.y >= rect.bottom() {
+                down = down.min((other.y - rect.bottom()) * 0.5);
+            }
+        }
+    }
+
     Rect::new(
-        rect.x - (w - rect.w) * 0.5,
-        rect.y - (h - rect.h) * 0.5,
-        w,
-        h,
+        rect.x - left,
+        rect.y - up,
+        rect.w + left + right,
+        rect.h + up + down,
     )
+}
+
+#[derive(Default)]
+struct Neighbours {
+    /// Controls seen last frame. The set is stable between frames in an
+    /// immediate-mode UI as long as the same panels are open, which is the same
+    /// property the keyboard focus ring already depends on.
+    last: Vec<Rect>,
+    building: Vec<Rect>,
+}
+
+thread_local! {
+    static NEIGHBOURS: RefCell<Neighbours> = RefCell::new(Neighbours::default());
+}
+
+/// Has a full frame of controls been seen yet?
+///
+/// The first frame of a scene grows every hit area without limits, because the
+/// limits come from the frame before it. A report taken then describes a state
+/// the game is never actually in.
+pub fn neighbours_warm() -> bool {
+    NEIGHBOURS.with(|slot| !slot.borrow().last.is_empty())
+}
+
+/// Note a control for next frame's growth limits. Called by the widgets.
+pub fn note_neighbour(rect: Rect) {
+    NEIGHBOURS.with(|slot| slot.borrow_mut().building.push(rect));
+}
+
+/// Roll this frame's controls into next frame's limits. Call once per frame,
+/// after everything has drawn.
+pub fn end_frame_neighbours() {
+    NEIGHBOURS.with(|slot| {
+        let mut n = slot.borrow_mut();
+        n.last = std::mem::take(&mut n.building);
+    });
 }
 
 /// Pairs of grown hit areas that overlap, and by how much.
@@ -174,6 +255,44 @@ pub fn begin_target_audit() {
         audit.recording = true;
         audit.seen.clear();
         audit.areas.clear();
+    });
+}
+
+/// Forget controls covered by a panel painted over them.
+///
+/// The same rule the collision check needed (§5.47): a control under an opaque
+/// overlay cannot be pressed, so it cannot be ambiguous with anything. Without
+/// this the settings panel’s buttons “overlap” the wager panel’s underneath it,
+/// which is thirty-two findings about a screen the player never sees.
+pub fn occlude(rect: Rect) {
+    AUDIT.with(|audit| {
+        let mut audit = audit.borrow_mut();
+        if !audit.recording {
+            return;
+        }
+        audit
+            .areas
+            .retain(|(area, _)| !rect.contains(area.center()));
+    });
+    NEIGHBOURS.with(|slot| {
+        let mut n = slot.borrow_mut();
+        n.building.retain(|r| !rect.contains(r.center()));
+    });
+}
+
+/// Start a fresh frame of measurements.
+///
+/// Growth is limited by the *previous* frame’s controls, so the first frame of
+/// a scene has no limits and its numbers are wrong. Measuring per frame rather
+/// than accumulating means the report describes a frame that had neighbours to
+/// work with (§5.48).
+pub fn begin_target_frame() {
+    AUDIT.with(|audit| {
+        let mut audit = audit.borrow_mut();
+        if audit.recording {
+            audit.seen.clear();
+            audit.areas.clear();
+        }
     });
 }
 
@@ -353,6 +472,54 @@ mod tests {
         let touch = touch_area(Rect::new(0.0, 0.0, 300.0, 28.0));
         assert!((touch.w - 300.0).abs() < 1e-3);
         assert!((touch.h - MIN_TARGET).abs() < 1e-3);
+    }
+
+    #[test]
+    fn growth_stops_halfway_to_a_neighbour() {
+        // The fault the verification harness found: on a narrow screen the
+        // controls sit closer together, and growing every one to the standard
+        // made them overlap by thousands of square pixels.
+        let a = Rect::new(0.0, 0.0, 100.0, 28.0);
+        let b = Rect::new(0.0, 36.0, 100.0, 28.0);
+        let grown = touch_area_among(a, &[a, b]);
+        // 8px gap, so 4px each way, not the 8 the standard would want.
+        assert!((grown.bottom() - 32.0).abs() < 0.01, "{:?}", grown);
+        assert!(grown.bottom() <= b.y);
+    }
+
+    #[test]
+    fn a_control_with_room_still_takes_the_whole_standard() {
+        let lonely = Rect::new(0.0, 0.0, 20.0, 20.0);
+        let far = Rect::new(0.0, 400.0, 20.0, 20.0);
+        let grown = touch_area_among(lonely, &[lonely, far]);
+        assert!((grown.h - MIN_TARGET).abs() < 0.01, "{:?}", grown);
+    }
+
+    #[test]
+    fn neighbours_that_share_no_band_do_not_constrain() {
+        // A control in another column cannot be run into vertically.
+        let here = Rect::new(0.0, 0.0, 20.0, 20.0);
+        let elsewhere = Rect::new(500.0, 22.0, 20.0, 20.0);
+        let grown = touch_area_among(here, &[here, elsewhere]);
+        assert!((grown.h - MIN_TARGET).abs() < 0.01, "{:?}", grown);
+    }
+
+    #[test]
+    fn grown_areas_never_overlap_however_tight_the_row() {
+        // The property, stated directly: whatever the spacing, no two hit areas
+        // may claim the same pixel.
+        for gap in [0.0f32, 2.0, 6.0, 20.0, 60.0] {
+            let rects: Vec<Rect> = (0..5)
+                .map(|i| Rect::new(0.0, i as f32 * (28.0 + gap), 100.0, 28.0))
+                .collect();
+            let grown: Vec<Rect> = rects.iter().map(|r| touch_area_among(*r, &rects)).collect();
+            for (i, a) in grown.iter().enumerate() {
+                for b in grown.iter().skip(i + 1) {
+                    let h = (a.bottom().min(b.bottom()) - a.y.max(b.y)).max(0.0);
+                    assert!(h <= 0.01, "gap {} left {:?} over {:?}", gap, a, b);
+                }
+            }
+        }
     }
 
     /// The cost of growing hit areas, made visible.
