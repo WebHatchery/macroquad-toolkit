@@ -133,6 +133,13 @@ pub fn draw_ui_text_ex<'a>(
     if super::bounds::auditing() {
         super::bounds::note(text, x, drawn.width);
         super::bounds::note_contrast(text, color, size);
+        // The baseline sits at `y`, so the box rises above it. Cap height is
+        // near 0.72em and descenders reach about 0.22 below, which is close
+        // enough to catch a collision and loose enough not to invent one.
+        super::bounds::note_extent(
+            text,
+            Rect::new(x, y - size * 0.72, drawn.width, size * 0.94),
+        );
     }
     drawn
 }
@@ -600,6 +607,15 @@ pub fn draw_text_block_ex(
         if super::bounds::auditing() {
             super::bounds::note(line, x, drawn.width);
             super::bounds::note_contrast(line, style.color, effective_font_size(layout.font_size));
+            super::bounds::note_extent(
+                line,
+                Rect::new(
+                    x,
+                    line_y - draw_font_size * 0.72,
+                    drawn.width,
+                    draw_font_size * 0.94,
+                ),
+            );
         }
         line_y += draw_font_size + line_gap;
     }
@@ -658,6 +674,15 @@ pub fn draw_text_centered_in_box_ex(
         if super::bounds::auditing() {
             super::bounds::note(line, line_x, line_width);
             super::bounds::note_contrast(line, style.color, draw_font_size);
+            super::bounds::note_extent(
+                line,
+                Rect::new(
+                    line_x,
+                    line_y - draw_font_size * 0.72,
+                    line_width,
+                    draw_font_size * 0.94,
+                ),
+            );
         }
         line_y += draw_font_size + line_gap;
     }

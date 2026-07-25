@@ -51,12 +51,21 @@ pub enum Finding {
         required: f32,
         font_size: f32,
     },
+    /// It is drawn over something else in the same region (§5.47).
+    Collision {
+        text: String,
+        /// What it ran into — another string, or a control it does not belong to.
+        other: String,
+        overlap: f32,
+    },
 }
 
 impl Finding {
     pub fn text(&self) -> &str {
         match self {
-            Finding::Overflow { text, .. } | Finding::LowContrast { text, .. } => text,
+            Finding::Overflow { text, .. }
+            | Finding::LowContrast { text, .. }
+            | Finding::Collision { text, .. } => text,
         }
     }
 
@@ -75,6 +84,9 @@ impl Finding {
                 "contrast {:.1}:1 against {:.1} needed at {:.0}px",
                 ratio, required, font_size
             ),
+            Finding::Collision { other, overlap, .. } => {
+                format!("overlaps {:?} by {:.0}px²", other, overlap)
+            }
         }
     }
 }
@@ -88,11 +100,26 @@ struct Bounds {
     behind: Option<Color>,
 }
 
+/// Something occupying space on screen, for the collision check.
+#[derive(Debug, Clone)]
+struct Drawn {
+    rect: Rect,
+    what: String,
+    /// A control rather than a string. Text sitting wholly inside one is its
+    /// label and is not a collision.
+    is_control: bool,
+}
+
 #[derive(Default)]
 struct State {
     stack: Vec<Bounds>,
     auditing: bool,
     findings: Vec<Finding>,
+    drawn: Vec<Drawn>,
+    /// Collisions are only meaningful on a screen the game can actually show.
+    /// The all-panels audit scene opens twelve overlays at once and they
+    /// genuinely overlap, which says nothing about the game (§5.47).
+    collisions: bool,
 }
 
 thread_local! {
@@ -125,7 +152,18 @@ impl Region {
     }
 
     fn push(rect: Rect, behind: Option<Color>) -> Self {
-        STATE.with(|state| state.borrow_mut().stack.push(Bounds { rect, behind }));
+        STATE.with(|state| {
+            let mut state = state.borrow_mut();
+            // A region that says what is behind it has painted a surface, and
+            // that surface hides whatever was already there. Without this, an
+            // overlay panel's text "collides" with the wager panel underneath
+            // it — which it does not, because the player cannot see the wager
+            // panel at all (§5.47).
+            if behind.is_some() {
+                state.drawn.retain(|d| !rect.contains(d.rect.center()));
+            }
+            state.stack.push(Bounds { rect, behind });
+        });
         Self { _private: () }
     }
 
@@ -176,6 +214,8 @@ pub fn begin_audit() {
         let mut state = state.borrow_mut();
         state.auditing = true;
         state.findings.clear();
+        state.drawn.clear();
+        state.collisions = false;
     });
 }
 
@@ -207,6 +247,84 @@ pub fn auditing() -> bool {
 ///
 /// Called by the text helpers. A draw outside any region is not a finding: the
 /// reels and the celebration cards paint over the whole screen on purpose.
+/// Note a control's footprint, so text drawn over it can be caught (§5.47).
+pub fn note_control(label: &str, rect: Rect) {
+    STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        if !state.auditing {
+            return;
+        }
+        state.drawn.push(Drawn {
+            rect,
+            what: label.to_owned(),
+            is_control: true,
+        });
+    });
+}
+
+/// Note a piece of text's footprint and report anything it lands on.
+///
+/// The fault §5.46 exposed: the layout audit checked text against its region's
+/// *edge* and nothing else, so a title drawn straight through a button was
+/// "clean". Overflow past a boundary and collision with a sibling are different
+/// questions, and only the first was being asked.
+///
+/// Text lying wholly inside a control is that control's own label and is
+/// skipped. Text that only *partly* covers one is a collision, which is exactly
+/// the shape the header fault took.
+/// Also record what lands on what. Only meaningful one screen at a time.
+pub fn begin_collision_audit() {
+    STATE.with(|state| state.borrow_mut().collisions = true);
+}
+
+pub fn note_extent(text: &str, rect: Rect) {
+    // A stroke is drawn four times at the same place on purpose; reporting it
+    // as colliding with the label it exists to make readable would be reporting
+    // the fix as the fault, exactly as it would for contrast.
+    if DECORATIVE.with(|depth| *depth.borrow()) > 0 {
+        return;
+    }
+    STATE.with(|state| {
+        let mut state = state.borrow_mut();
+        if !state.auditing || !state.collisions {
+            return;
+        }
+        let mut hits = Vec::new();
+        for other in &state.drawn {
+            let w = (rect.right().min(other.rect.right()) - rect.x.max(other.rect.x)).max(0.0);
+            let h = (rect.bottom().min(other.rect.bottom()) - rect.y.max(other.rect.y)).max(0.0);
+            if w <= 1.0 || h <= 1.0 {
+                continue;
+            }
+            // Inside a control means it is that control's label.
+            if other.is_control
+                && rect.x >= other.rect.x - 1.0
+                && rect.right() <= other.rect.right() + 1.0
+                && rect.y >= other.rect.y - 1.0
+                && rect.bottom() <= other.rect.bottom() + 1.0
+            {
+                continue;
+            }
+            hits.push((other.what.clone(), w * h));
+        }
+        state.drawn.push(Drawn {
+            rect,
+            what: text.to_owned(),
+            is_control: false,
+        });
+        for (other, overlap) in hits {
+            let finding = Finding::Collision {
+                text: text.to_owned(),
+                other,
+                overlap,
+            };
+            if !state.findings.contains(&finding) {
+                state.findings.push(finding);
+            }
+        }
+    });
+}
+
 pub fn note(text: &str, x: f32, width: f32) {
     STATE.with(|state| {
         let mut state = state.borrow_mut();
@@ -306,6 +424,7 @@ mod tests {
     #[test]
     fn text_that_fits_is_not_a_finding() {
         begin_audit();
+        begin_collision_audit();
         let _region = Region::new(panel());
         note("short", 110.0, 60.0);
         assert!(take_audit().is_empty());
@@ -339,8 +458,116 @@ mod tests {
     #[test]
     fn a_hair_over_is_rounding_rather_than_a_defect() {
         begin_audit();
+        begin_collision_audit();
         let _region = Region::new(panel());
         note("just about", 110.0, 391.0);
+        assert!(take_audit().is_empty());
+    }
+
+    /// The fault §5.46 exposed and §5.47 exists for.
+    ///
+    /// A title drawn straight through a button never crossed its *region's*
+    /// edge, so the overflow check called it clean. Overflow past a boundary and
+    /// collision with a sibling are different questions.
+    #[test]
+    fn text_drawn_across_a_control_is_reported() {
+        begin_audit();
+        begin_collision_audit();
+        let _region = Region::new(panel());
+        note_control("a button", Rect::new(200.0, 100.0, 100.0, 40.0));
+        note_extent("a title", Rect::new(150.0, 105.0, 120.0, 30.0));
+
+        let found = take_audit();
+        assert_eq!(found.len(), 1, "{:?}", found);
+        assert!(
+            found[0].describe().contains("overlaps"),
+            "{}",
+            found[0].describe()
+        );
+    }
+
+    #[test]
+    fn a_controls_own_label_is_not_a_collision() {
+        // Every button draws its text inside itself. Reporting that would make
+        // the check useless from the first frame.
+        begin_audit();
+        begin_collision_audit();
+        let _region = Region::new(panel());
+        note_control("a button", Rect::new(200.0, 100.0, 100.0, 40.0));
+        note_extent("Press", Rect::new(220.0, 112.0, 60.0, 16.0));
+        assert!(take_audit().is_empty());
+    }
+
+    #[test]
+    fn two_strings_over_one_another_are_reported() {
+        begin_audit();
+        begin_collision_audit();
+        let _region = Region::new(panel());
+        note_extent("first", Rect::new(150.0, 100.0, 100.0, 20.0));
+        note_extent("second", Rect::new(200.0, 105.0, 100.0, 20.0));
+        assert_eq!(take_audit().len(), 1);
+    }
+
+    #[test]
+    fn text_that_merely_touches_is_not_a_collision() {
+        // Adjacent labels share an edge constantly; a hairline is rounding.
+        begin_audit();
+        begin_collision_audit();
+        let _region = Region::new(panel());
+        note_extent("left", Rect::new(150.0, 100.0, 100.0, 20.0));
+        note_extent("right", Rect::new(250.0, 100.0, 100.0, 20.0));
+        assert!(take_audit().is_empty());
+    }
+
+    /// The five findings this check produced on its first real run were all
+    /// this: an overlay's text "colliding" with a panel underneath that the
+    /// player cannot see.
+    #[test]
+    fn a_panel_hides_what_is_underneath_it() {
+        begin_audit();
+        begin_collision_audit();
+        {
+            let _behind = Region::on(panel(), Color::new(0.1, 0.1, 0.1, 1.0));
+            note_extent("underneath", Rect::new(150.0, 100.0, 200.0, 20.0));
+        }
+        {
+            // An overlay painting its own surface over the same place.
+            let _over = Region::on(
+                Rect::new(140.0, 90.0, 240.0, 60.0),
+                Color::new(0.1, 0.1, 0.1, 1.0),
+            );
+            note_extent("on top", Rect::new(150.0, 105.0, 200.0, 20.0));
+        }
+        assert!(take_audit().is_empty());
+    }
+
+    #[test]
+    fn a_region_that_names_no_surface_hides_nothing() {
+        // `Region::new` says where, not what on — it has painted nothing, so it
+        // cannot be covering anything.
+        begin_audit();
+        begin_collision_audit();
+        let _behind = Region::new(panel());
+        note_extent("underneath", Rect::new(150.0, 100.0, 200.0, 20.0));
+        {
+            let _over = Region::new(Rect::new(140.0, 90.0, 240.0, 60.0));
+            note_extent("on top", Rect::new(150.0, 105.0, 200.0, 20.0));
+        }
+        assert_eq!(take_audit().len(), 1);
+    }
+
+    #[test]
+    fn a_decorative_stroke_does_not_collide_with_the_label_it_serves() {
+        // The meter draws its label four times in near-black behind itself to
+        // keep it readable. Reporting that is reporting the fix as the fault.
+        begin_audit();
+        begin_collision_audit();
+        let _region = Region::new(panel());
+        {
+            let _stroke = Decorative::new();
+            note_extent("Hoard 0/15", Rect::new(150.0, 100.0, 100.0, 20.0));
+        }
+        note_extent("Hoard 0/15", Rect::new(151.0, 101.0, 100.0, 20.0));
         assert!(take_audit().is_empty());
     }
 
@@ -349,6 +576,7 @@ mod tests {
         // An outline is deliberately invisible against a dark panel. Reporting
         // it would be reporting the fix as the fault.
         begin_audit();
+        begin_collision_audit();
         let _region = Region::on(panel(), Color::new(0.07, 0.06, 0.07, 1.0));
         {
             let _stroke = Decorative::new();
@@ -361,6 +589,7 @@ mod tests {
     fn the_label_itself_is_still_judged() {
         // The guard covers the stroke and nothing after it.
         begin_audit();
+        begin_collision_audit();
         let _region = Region::on(panel(), Color::new(0.07, 0.06, 0.07, 1.0));
         {
             let _stroke = Decorative::new();
@@ -374,6 +603,7 @@ mod tests {
     fn contrast_is_not_judged_where_no_surface_was_declared() {
         // `Region::new` says where, not what on. Guessing would invent findings.
         begin_audit();
+        begin_collision_audit();
         let _region = Region::new(panel());
         note_contrast("anything", Color::new(0.1, 0.1, 0.1, 1.0), 14.0);
         assert!(take_audit().is_empty());
@@ -439,6 +669,7 @@ mod tests {
         // The audit runs while the game is drawing, which redraws everything
         // sixty times a second.
         begin_audit();
+        begin_collision_audit();
         let _region = Region::new(panel());
         for _ in 0..60 {
             note("a long line", 110.0, 500.0);
@@ -449,6 +680,7 @@ mod tests {
     #[test]
     fn taking_the_audit_stops_it() {
         begin_audit();
+        begin_collision_audit();
         let _region = Region::new(panel());
         note("a long line", 110.0, 500.0);
         assert_eq!(take_audit().len(), 1);
