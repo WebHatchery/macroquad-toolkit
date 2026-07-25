@@ -120,7 +120,13 @@ pub fn draw_ui_text_ex<'a>(
     if params.font.is_none() {
         params.font = default_ui_font();
     }
-    macroquad::prelude::draw_text_ex(text, x, y, params)
+    let drawn = macroquad::prelude::draw_text_ex(text, x, y, params);
+    // What it measured, against what the enclosing region had. Free unless an
+    // audit is running (see `ui::bounds`).
+    if super::bounds::auditing() {
+        super::bounds::note(text, x, drawn.width);
+    }
+    drawn
 }
 
 /// Set a global multiplier used by toolkit text helpers.
@@ -648,7 +654,18 @@ pub fn draw_text_right(text: &str, right_x: f32, baseline_y: f32, style: TextSty
         1.0,
     )
     .width;
-    draw_text_ex(text, right_x - width, baseline_y, style.params());
+    let left = right_x - width;
+    if super::bounds::auditing() {
+        // Right-aligned text runs off the *left*, so it is measured from where
+        // it actually starts rather than from where it was anchored.
+        super::bounds::note(text, left, width);
+        if let Some(region) = super::bounds::current() {
+            if left < region.x - 2.0 {
+                super::bounds::note(text, region.x, region.right() - left);
+            }
+        }
+    }
+    draw_text_ex(text, left, baseline_y, style.params());
 }
 
 pub fn draw_text_shadow(
