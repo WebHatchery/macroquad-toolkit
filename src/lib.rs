@@ -63,6 +63,7 @@ pub mod settings;
 pub mod sprite;
 pub mod synth;
 pub mod states;
+pub mod strip;
 pub mod timing;
 pub mod ui;
 
