@@ -60,6 +60,7 @@ pub mod math;
 pub mod paint;
 pub mod raster;
 pub mod rng;
+pub mod score;
 pub mod settings;
 pub mod sprite;
 pub mod states;
