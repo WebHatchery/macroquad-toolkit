@@ -120,6 +120,11 @@ pub fn draw_ui_text_ex<'a>(
     if params.font.is_none() {
         params.font = default_ui_font();
     }
+    // Pseudolocalisation (see `ui::pseudo`) happens here rather than at the call
+    // sites, so a string that never reaches a text helper is visible by *not*
+    // being marked — which is itself a finding.
+    let swapped = super::pseudo::apply(text);
+    let text = swapped.as_deref().unwrap_or(text);
     let drawn = macroquad::prelude::draw_text_ex(text, x, y, params);
     // What it measured, against what the enclosing region had. Free unless an
     // audit is running (see `ui::bounds`).
@@ -411,6 +416,12 @@ pub fn wrap_text_ex(
     font: Option<&Font>,
     font_size: f32,
 ) -> Vec<String> {
+    // The single place a block of text is expanded (see `ui::pseudo`). Before
+    // wrapping, because the whole question is whether the longer text still
+    // fits — and *only* here, since `fit_text_to_box_ex` reaches this function
+    // and expanding in both produced `[[doubly marked]]` text.
+    let swapped = super::pseudo::apply(text);
+    let text = swapped.as_deref().unwrap_or(text);
     let font = font.or(default_ui_font());
     let font_size = effective_font_size(font_size);
     let mut wrapped = Vec::new();
@@ -563,6 +574,12 @@ pub fn draw_text_block_ex(
     style: TextStyle<'_>,
     min_font_size: f32,
 ) -> TextLayoutResult {
+    // Expand the block once, then hold it: the per-line draws below go through
+    // the same helpers (see `ui::pseudo::Once`).
+    let swapped = super::pseudo::apply(text);
+    let text = swapped.as_deref().unwrap_or(text);
+    let _once = super::pseudo::Once::new();
+
     let layout = fit_text_to_box_ex(text, w, h, style, min_font_size);
     let draw_font_size = effective_font_size(layout.font_size);
     let line_gap = style.effective_line_gap();
@@ -603,6 +620,9 @@ pub fn draw_text_centered_in_box_ex(
     h: f32,
     style: TextStyle<'_>,
 ) -> TextLayoutResult {
+    let swapped = super::pseudo::apply(text);
+    let text = swapped.as_deref().unwrap_or(text);
+    let _once = super::pseudo::Once::new();
     let layout = fit_text_to_box_ex(text, w, h, style, 10.0);
     let draw_font_size = effective_font_size(layout.font_size);
     let line_gap = style.effective_line_gap();
@@ -647,6 +667,8 @@ pub fn draw_text_centered(text: &str, center_x: f32, baseline_y: f32, style: Tex
 }
 
 pub fn draw_text_right(text: &str, right_x: f32, baseline_y: f32, style: TextStyle<'_>) {
+    let swapped = super::pseudo::apply(text);
+    let text = swapped.as_deref().unwrap_or(text);
     let width = measure_text(
         text,
         style.resolved_font(),

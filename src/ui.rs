@@ -7,6 +7,7 @@ mod hover_tooltip;
 mod layout;
 mod number;
 mod plaque;
+mod pseudo;
 mod scroll_tabs;
 mod surfaces;
 mod widgets;
@@ -18,6 +19,10 @@ pub use hover_tooltip::*;
 pub use layout::*;
 pub use number::*;
 pub use plaque::*;
+pub use pseudo::{
+    active as pseudo_active, disable as pseudo_disable, enable as pseudo_enable,
+    Once as PseudoOnce, Pseudo,
+};
 pub use scroll_tabs::*;
 pub use surfaces::*;
 pub use widgets::*;
