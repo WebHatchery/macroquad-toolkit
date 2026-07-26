@@ -45,6 +45,61 @@ struct LoadWrapper<T> {
     data: T,
 }
 
+/// The browser key a slot is stored under.
+///
+/// # Every game on an origin shared one drawer
+///
+/// The native path writes `{app_data}/{game_name}/save_{slot}.json`, so two
+/// games can both have an "autosave" and never meet. The web path used
+/// `save_{slot}` with the game name explicitly discarded — and `localStorage`
+/// is per **origin**, not per page. Every macroquad game published to the same
+/// host shared one keyspace.
+///
+/// That was not hypothetical. Across this workspace three games shipped with
+/// `save_slot: "autosave"` and two more with `"campaign"`; on a shared host,
+/// playing one silently overwrote the other's save. The sibling module
+/// (`persistence::keys`, which stores preferences and the like) had always
+/// qualified its keys. Only slots — the ones holding the actual game — did not.
+///
+/// # Adopting what is already there
+///
+/// A key that changes is a save that vanishes, so a read that misses the
+/// qualified key falls back to the legacy one (see [`legacy_storage_key`]) and
+/// the next write moves it across. A player mid-game keeps their game; two
+/// players of different games stop colliding.
+// Only the web build calls these, but they are compiled and tested on every
+// target on purpose: the rule they encode is the one that lost saves, and a
+// rule that can only be checked by opening a browser is a rule nobody checks.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub(crate) fn storage_key(game_name: &str, slot_name: &str) -> String {
+    format!(
+        "{}_save_{}",
+        super::keys::sanitize_key(game_name),
+        super::keys::sanitize_key(slot_name)
+    )
+}
+
+/// What the key was before it was qualified by game. Read-only: nothing writes
+/// here any more, and the first save after a load moves the data forward.
+#[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+pub(crate) fn legacy_storage_key(slot_name: &str) -> String {
+    format!("save_{}", slot_name)
+}
+
+/// Read a slot from browser storage, adopting a legacy unqualified save.
+#[cfg(target_arch = "wasm32")]
+fn storage_read(game_name: &str, slot_name: &str) -> Option<String> {
+    crate::wasm_storage::storage_get(&storage_key(game_name, slot_name))
+        .or_else(|| crate::wasm_storage::storage_get(&legacy_storage_key(slot_name)))
+}
+
+/// Does this slot exist, under either key?
+#[cfg(target_arch = "wasm32")]
+fn storage_has(game_name: &str, slot_name: &str) -> bool {
+    crate::wasm_storage::storage_exists(&storage_key(game_name, slot_name))
+        || crate::wasm_storage::storage_exists(&legacy_storage_key(slot_name))
+}
+
 /// Save game data to a named slot (cross-platform)
 ///
 /// - Native: Saves to `{app_data}/{game_name}/save_{slot_name}.json`
@@ -69,12 +124,12 @@ pub fn save_to_slot_with_version<T: Serialize>(
     let serialized =
         serde_json::to_string(&wrapper).map_err(|e| format!("Serialization error: {}", e))?;
 
+    #[cfg(not(target_arch = "wasm32"))]
     let key = format!("save_{}", slot_name);
 
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = game_name; // unused in WASM
-        crate::wasm_storage::storage_set(&key, &serialized);
+        crate::wasm_storage::storage_set(&storage_key(game_name, slot_name), &serialized);
         Ok(())
     }
 
@@ -88,13 +143,13 @@ pub fn save_to_slot_with_version<T: Serialize>(
 
 /// Load game data from a named slot (cross-platform)
 pub fn load_from_slot<T: DeserializeOwned>(game_name: &str, slot_name: &str) -> Result<T, String> {
+    #[cfg(not(target_arch = "wasm32"))]
     let key = format!("save_{}", slot_name);
 
     let content = {
         #[cfg(target_arch = "wasm32")]
         {
-            let _ = game_name; // unused in WASM
-            crate::wasm_storage::storage_get(&key)
+            storage_read(game_name, slot_name)
                 .ok_or_else(|| format!("No save found for slot: {}", slot_name))?
         }
 
@@ -114,12 +169,12 @@ pub fn load_from_slot<T: DeserializeOwned>(game_name: &str, slot_name: &str) -> 
 
 /// Check if a save slot exists
 pub fn slot_exists(game_name: &str, slot_name: &str) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
     let key = format!("save_{}", slot_name);
 
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = game_name; // unused in WASM
-        crate::wasm_storage::storage_exists(&key)
+        storage_has(game_name, slot_name)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -134,12 +189,13 @@ pub fn slot_exists(game_name: &str, slot_name: &str) -> bool {
 
 /// Delete a save slot
 pub fn delete_slot(game_name: &str, slot_name: &str) -> Result<(), String> {
+    #[cfg(not(target_arch = "wasm32"))]
     let key = format!("save_{}", slot_name);
 
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = game_name; // unused in WASM
-        crate::wasm_storage::storage_remove(&key);
+        crate::wasm_storage::storage_remove(&storage_key(game_name, slot_name));
+        crate::wasm_storage::storage_remove(&legacy_storage_key(slot_name));
         Ok(())
     }
 
@@ -158,13 +214,14 @@ pub fn delete_slot(game_name: &str, slot_name: &str) -> Result<(), String> {
 
 /// Peek the version recorded in a save slot.
 pub fn peek_slot_version(game_name: &str, slot_name: &str) -> Result<Option<String>, String> {
+    #[cfg(not(target_arch = "wasm32"))]
     let key = format!("save_{}", slot_name);
 
     let content = {
         #[cfg(target_arch = "wasm32")]
         {
             let _ = game_name;
-            crate::wasm_storage::storage_get(&key)
+            storage_read(game_name, slot_name)
                 .ok_or_else(|| format!("No save found for slot: {}", slot_name))?
         }
 
@@ -190,13 +247,14 @@ where
     T: DeserializeOwned,
     F: FnOnce(Option<String>, Value) -> Result<T, String>,
 {
+    #[cfg(not(target_arch = "wasm32"))]
     let key = format!("save_{}", slot_name);
 
     let content = {
         #[cfg(target_arch = "wasm32")]
         {
             let _ = game_name;
-            crate::wasm_storage::storage_get(&key)
+            storage_read(game_name, slot_name)
                 .ok_or_else(|| format!("No save found for slot: {}", slot_name))?
         }
 
@@ -260,5 +318,57 @@ pub fn get_save_slots(game_name: &str) -> Vec<String> {
         }
 
         saves
+    }
+}
+
+#[cfg(test)]
+mod storage_key_tests {
+    use super::*;
+
+    /// The bug, stated: two games with the same slot name must not collide.
+    ///
+    /// `localStorage` is per origin, and every game in this workspace is
+    /// published to the same host. Three of them shipped with `save_slot:
+    /// "autosave"` and two more with `"campaign"`, so playing one overwrote
+    /// another's save (§5.56). The native path never had the problem because a
+    /// directory per game did the qualifying for free.
+    #[test]
+    fn two_games_with_the_same_slot_get_different_keys() {
+        let one = storage_key("dragons_den", "autosave");
+        let other = storage_key("biofoundry", "autosave");
+        assert_ne!(one, other, "two games would share a browser save");
+        assert!(one.contains("dragons_den"));
+        assert!(other.contains("biofoundry"));
+    }
+
+    /// And one game's two slots still differ, which is the thing that was
+    /// already working and must not be broken by fixing the other.
+    #[test]
+    fn one_game_keeps_its_slots_apart() {
+        assert_ne!(
+            storage_key("dragons_hoard", "dragon_autosave"),
+            storage_key("dragons_hoard", "wallet")
+        );
+    }
+
+    /// The migration path: the old key is still recognised, and is not the same
+    /// as the new one, or the fallback would be reading itself.
+    #[test]
+    fn the_legacy_key_is_what_the_old_build_wrote() {
+        assert_eq!(legacy_storage_key("autosave"), "save_autosave");
+        assert_ne!(
+            legacy_storage_key("autosave"),
+            storage_key("dragons_den", "autosave")
+        );
+    }
+
+    /// A game name with a path separator in it must not produce a key that
+    /// looks like two keys — the same sanitising the sibling module has always
+    /// done, now shared rather than duplicated.
+    #[test]
+    fn a_hostile_game_name_is_sanitised() {
+        let key = storage_key("../other", "autosave");
+        assert!(!key.contains('/'), "{}", key);
+        assert!(!key.contains('\\'), "{}", key);
     }
 }

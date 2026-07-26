@@ -6,7 +6,12 @@ use serde::{de::DeserializeOwned, Serialize};
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs;
 
-fn sanitize_key(key: &str) -> String {
+/// Strip characters a filesystem or a storage key cannot carry.
+///
+/// Shared with `slots`, so the two modules cannot disagree about what a game is
+/// called — which is exactly how they came to store things under different
+/// names in the first place (§5.56).
+pub(super) fn sanitize_key(key: &str) -> String {
     key.chars()
         .map(|ch| match ch {
             '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
