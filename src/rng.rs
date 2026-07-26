@@ -34,6 +34,32 @@ impl SeededRng {
         }
     }
 
+    /// The generator's whole state, which is also its whole future.
+    ///
+    /// An xorshift has no hidden inputs: this number and the code below decide
+    /// every draw that follows. Exposing it lets a game *commit* to an outcome
+    /// before revealing it — record the state, spin, and anyone holding the
+    /// number can re-run the same draw and get the same answer.
+    pub fn state(&self) -> u64 {
+        self.state
+    }
+
+    /// Restore a generator to a state taken from [`state`](Self::state).
+    ///
+    /// Deliberately not `new`: `new` mixes the seed, and a value that came back
+    /// out of `state` must go back in untouched or the stream will not replay.
+    /// The zero guard is the same one `new` carries and for the same reason — a
+    /// zero state is an xorshift's fixed point and returns 0 forever.
+    pub fn from_state(state: u64) -> Self {
+        Self {
+            state: if state == 0 {
+                0xDEAD_BEEF_CAFE_F00D
+            } else {
+                state
+            },
+        }
+    }
+
     pub fn next_u64(&mut self) -> u64 {
         let mut x = self.state;
         x ^= x >> 12;
@@ -249,5 +275,55 @@ mod zero_state_tests {
             };
             assert_eq!(SeededRng::new(seed).next_u64(), expected, "seed {}", seed);
         }
+    }
+}
+
+#[cfg(test)]
+mod replay {
+    use super::*;
+
+    /// The property a commitment scheme rests on: the state is the future.
+    #[test]
+    fn a_captured_state_replays_the_same_stream() {
+        let mut live = SeededRng::new(0xD2A6_0F1E);
+        for _ in 0..17 {
+            live.next_u64();
+        }
+
+        let captured = live.state();
+        let ahead: Vec<u64> = (0..64).map(|_| live.next_u64()).collect();
+
+        let mut replayed = SeededRng::from_state(captured);
+        let again: Vec<u64> = (0..64).map(|_| replayed.next_u64()).collect();
+        assert_eq!(
+            ahead, again,
+            "a restored generator diverged from the original"
+        );
+    }
+
+    /// `from_state` must not mix. Feeding a seed to `new` and the same number
+    /// to `from_state` are different requests and have to stay different.
+    #[test]
+    fn from_state_does_not_mix_the_way_new_does() {
+        let seeded = SeededRng::new(12_345);
+        assert_ne!(seeded.state(), 12_345, "new stopped mixing its seed");
+        assert_eq!(SeededRng::from_state(12_345).state(), 12_345);
+        assert_eq!(
+            SeededRng::from_state(seeded.state()).state(),
+            seeded.state(),
+            "a round trip through from_state must be the identity"
+        );
+    }
+
+    /// Zero is the fixed point, on this door as much as on the other one.
+    #[test]
+    fn a_zero_state_is_refused_here_too() {
+        let mut zeroed = SeededRng::from_state(0);
+        assert_ne!(zeroed.state(), 0);
+        let draws: Vec<u64> = (0..8).map(|_| zeroed.next_u64()).collect();
+        assert!(
+            draws.iter().any(|value| *value != 0),
+            "a zero state produced a dead stream"
+        );
     }
 }
