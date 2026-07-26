@@ -59,6 +59,7 @@ pub mod input;
 pub mod math;
 pub mod paint;
 pub mod raster;
+pub mod reveal;
 pub mod rng;
 pub mod score;
 pub mod series;
