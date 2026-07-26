@@ -102,6 +102,24 @@ impl Pointer {
     pub fn released_on(&self, rect: Rect) -> bool {
         self.released && rect.contains(self.position)
     }
+
+    /// The same pointer with its press taken away — still somewhere, no longer
+    /// pressing anything.
+    ///
+    /// For when something upstream has claimed the gesture: a
+    /// [`ScrollArea`](crate::ui::ScrollArea) that turned it into a drag, or a
+    /// panel drawn over the top. Passing this down means the controls underneath
+    /// draw exactly as they would have and simply do not fire, instead of each
+    /// of them having to know what else might be going on.
+    ///
+    /// Hover survives, because the cursor really is still there.
+    pub fn suppressed(&self) -> Self {
+        Self {
+            released: false,
+            down: false,
+            ..*self
+        }
+    }
 }
 
 #[derive(Default)]
