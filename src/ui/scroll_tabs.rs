@@ -133,30 +133,43 @@ impl ScrollArea {
         self.offset = self.offset.clamp(0.0, max_offset);
     }
 
-    /// Draws the scrollbar track and proportional handle. No-op when the
-    /// content fits inside the view.
+    /// Draws the scrollbar track and proportional handle in the default neutral
+    /// palette. No-op when the content fits inside the view. Games with their own
+    /// theme should call [`draw_scrollbar_with`](Self::draw_scrollbar_with).
     pub fn draw_scrollbar(&self, view: Rect, content_height: f32) {
+        self.draw_scrollbar_with(
+            view,
+            content_height,
+            Color::new(0.1, 0.1, 0.12, 0.8),
+            with_alpha(dark::TEXT_DIM, 0.8),
+            dark::ACCENT,
+        );
+    }
+
+    /// Like [`draw_scrollbar`](Self::draw_scrollbar) but with caller-supplied
+    /// colors, so a themed UI can match its own palette: `track` behind the bar,
+    /// `handle` for the grip at rest, and `handle_active` while it is being
+    /// dragged. Pass colors evaluated at draw time so a runtime theme switch is
+    /// reflected. No-op when the content fits inside the view.
+    pub fn draw_scrollbar_with(
+        &self,
+        view: Rect,
+        content_height: f32,
+        track_color: Color,
+        handle: Color,
+        handle_active: Color,
+    ) {
         let max_offset = Self::max_offset(view, content_height);
         if max_offset <= 0.0 {
             return;
         }
         let track = self.track_rect(view);
-        draw_rectangle(
-            track.x,
-            track.y,
-            track.w,
-            track.h,
-            Color::new(0.1, 0.1, 0.12, 0.8),
-        );
+        draw_rectangle(track.x, track.y, track.w, track.h, track_color);
 
         let handle_h = self.handle_height(view, content_height);
         let t = self.offset / max_offset;
         let handle_y = view.y + t * (view.h - handle_h);
-        let color = if self.dragging {
-            dark::ACCENT
-        } else {
-            with_alpha(dark::TEXT_DIM, 0.8)
-        };
+        let color = if self.dragging { handle_active } else { handle };
         draw_rectangle(track.x + 1.0, handle_y, track.w - 2.0, handle_h, color);
     }
 
