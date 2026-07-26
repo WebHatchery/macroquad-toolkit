@@ -40,6 +40,8 @@
 //!
 //! All env access is stubbed out on `wasm32`, so web builds are unaffected.
 
+pub mod filmstrip;
+
 use macroquad::prelude::*;
 
 /// Capture parameters read from `PREFIX_CAPTURE_*` env vars.
