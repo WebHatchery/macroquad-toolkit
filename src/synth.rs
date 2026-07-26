@@ -33,6 +33,8 @@
 //! and a refactor that quietly changed every sound in a game would fail rather
 //! than ship.
 
+pub mod audit;
+
 use crate::rng::SeededRng;
 
 /// Oscillator shape.
@@ -117,6 +119,25 @@ impl Voice {
         self.duration
     }
 
+    pub fn shape(&self) -> Wave {
+        self.wave
+    }
+
+    /// The highest pitch this voice reaches while it can still be heard, and
+    /// how far into the voice that is.
+    ///
+    /// A rising glide aliases worst at the top, but the top is also where the
+    /// decay has run out — analysing the last sample would measure silence and
+    /// call the sweep clean. Three quarters through is high and still audible.
+    pub fn highest_audible(&self) -> (f32, f32) {
+        let at = if self.freq_to > self.freq_from {
+            self.duration * 0.75
+        } else {
+            self.duration * self.attack.clamp(0.05, 0.5)
+        };
+        (self.frequency(at), at)
+    }
+
     /// Amplitude envelope: linear attack, then a curved decay to silence.
     pub fn envelope(&self, t: f32) -> f32 {
         let progress = (t / self.duration).clamp(0.0, 1.0);
@@ -135,22 +156,68 @@ impl Voice {
         self.freq_from * (self.freq_to / self.freq_from).powf(progress)
     }
 
-    fn sample(&self, t: f32, phase: f32, rng: &mut SeededRng) -> f32 {
+    fn sample(&self, t: f32, phase: f32, nyquist: f32, rng: &mut SeededRng) -> f32 {
         let shape = match self.wave {
             Wave::Sine => (phase * std::f32::consts::TAU).sin(),
-            Wave::Square => {
-                if phase.fract() < 0.5 {
-                    1.0
-                } else {
-                    -1.0
-                }
+            Wave::Square | Wave::Triangle => {
+                band_limited(self.wave, phase, self.frequency(t), nyquist)
             }
-            Wave::Triangle => 4.0 * (phase.fract() - 0.5).abs() - 1.0,
             Wave::Noise => rng.range_f32(-1.0, 1.0),
         };
         shape * self.envelope(t) * self.gain
     }
 }
+
+/// A square or triangle built from the partials that *fit*.
+///
+/// # Why not the obvious shape
+///
+/// Comparing a phase against a threshold gives the honest waveform and an
+/// infinite harmonic series with it. Sampling cannot hold a partial above
+/// Nyquist and does not drop it — it reflects it back to `sample_rate - p`,
+/// landing at a frequency that is not a harmonic of the note or of anything
+/// else. That inharmonic partial sitting under the note *is* what "it sounds
+/// nasty" means, and it is worse the brighter the sound: this game's button
+/// blip, a square at 1200Hz in a 22kHz stream, was carrying a reflection only
+/// 21dB under the note it was supposed to be.
+///
+/// So the series is summed directly and stops at Nyquist. Nothing is generated
+/// that cannot be represented, so there is nothing to reflect. The cost is one
+/// `sin` per partial per sample, which for a handful of effects rendered once at
+/// startup is not a cost at all.
+///
+/// The classical series, both normalised to peak near 1:
+/// square is `4/π · Σ sin(2πnφ)/n` over odd `n`; triangle is
+/// `8/π² · Σ (-1)^((n-1)/2) · sin(2πnφ)/n²` over the same.
+fn band_limited(wave: Wave, phase: f32, freq: f32, nyquist: f32) -> f32 {
+    let angle = phase * std::f32::consts::TAU;
+    let highest = if freq > 0.0 {
+        (nyquist / freq) as u32
+    } else {
+        0
+    };
+    let mut sum = 0.0f32;
+    let mut n = 1u32;
+    while n <= highest && n <= MAX_PARTIALS {
+        let partial = (angle * n as f32).sin();
+        sum += match wave {
+            Wave::Square => partial / n as f32,
+            // Alternating sign is what makes it a triangle rather than a
+            // rounded square; without it the partials pile up on one side.
+            _ if ((n - 1) / 2).is_multiple_of(2) => partial / (n * n) as f32,
+            _ => -partial / (n * n) as f32,
+        };
+        n += 2;
+    }
+    match wave {
+        Wave::Square => sum * 4.0 / std::f32::consts::PI,
+        _ => sum * 8.0 / (std::f32::consts::PI * std::f32::consts::PI),
+    }
+}
+
+/// Past this the partials are inaudible and only cost time: the 129th partial
+/// of a square is 42dB down, and of a triangle 84dB.
+const MAX_PARTIALS: u32 = 129;
 
 /// Sum voices into normalised samples, before quantising to 16-bit.
 ///
@@ -179,8 +246,23 @@ pub fn render_wav(voices: &[Voice], config: &SynthConfig, seed: u64) -> Vec<u8> 
 /// effect — plot its envelope, check nothing clips — wants this rather than the
 /// container.
 pub fn render_waveform(voices: &[Voice], config: &SynthConfig, seed: u64) -> Vec<f32> {
+    let mut samples = render_unclamped(voices, config, seed);
+    for sample in &mut samples {
+        *sample = sample.clamp(-1.0, 1.0);
+    }
+    samples
+}
+
+/// The summed, gain-applied waveform *before* the limiter.
+///
+/// [`render_waveform`] clamps to `-1.0..=1.0`, which is what has to happen on
+/// the way to 16-bit — and which means an effect mixed too hot is silently
+/// flattened rather than reported. The overshoot is only visible here, so this
+/// is what an audit measures (`synth::audit`).
+pub fn render_unclamped(voices: &[Voice], config: &SynthConfig, seed: u64) -> Vec<f32> {
     let mut samples = render_samples(voices, config);
     let mut rng = SeededRng::new(seed);
+    let nyquist = config.sample_rate as f32 * 0.5;
 
     for voice in voices {
         let first = (voice.start * config.sample_rate as f32) as usize;
@@ -192,13 +274,13 @@ pub fn render_waveform(voices: &[Voice], config: &SynthConfig, seed: u64) -> Vec
                 break;
             };
             let t = index as f32 / config.sample_rate as f32;
-            *slot += voice.sample(t, phase, &mut rng);
+            *slot += voice.sample(t, phase, nyquist, &mut rng);
             phase += voice.frequency(t) / config.sample_rate as f32;
         }
     }
 
     for sample in &mut samples {
-        *sample = (*sample * config.master_gain).clamp(-1.0, 1.0);
+        *sample *= config.master_gain;
     }
     samples
 }
