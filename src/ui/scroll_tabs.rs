@@ -11,8 +11,46 @@ use crate::input::{is_hovered_rect, was_clicked_rect};
 use crate::ui::font::draw_text_centered_in_box;
 use crate::ui::{draw_surface, draw_text_centered_in_box_ex, RectExt, SurfaceStyle, TextStyle};
 
+/// Movement, in pixels, before a press inside a scroll area stops being a tap
+/// and becomes a drag of the content.
+///
+/// A finger never holds perfectly still, so zero would turn every tap into a
+/// one-pixel scroll and swallow the press. Too large and a short flick does
+/// nothing. Six is above the jitter of a deliberate tap and well below the
+/// shortest movement anyone means as a swipe.
+pub const PAN_THRESHOLD: f32 = 6.0;
+
+/// How fast a released fling loses speed, in 1/seconds.
+const FLING_DECAY: f32 = 5.0;
+
+/// Speed below which a fling is over, in pixels/second. Left running, it would
+/// creep for several seconds after it had visibly stopped.
+const FLING_STOP: f32 = 30.0;
+
+/// One frame of pointer state for a [`ScrollArea`], with no globals read.
+///
+/// [`update_at`](ScrollArea::update_at) fills this from macroquad and calls
+/// [`update_with`](ScrollArea::update_with). Keeping the decision separate from
+/// the reading is what lets the drag/fling behaviour be tested without a window
+/// — the same reason [`Pointer`](crate::ui::Pointer) takes its position rather
+/// than fetching it.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ScrollInput {
+    /// Pointer position, in the same space as the view rect.
+    pub pointer: Vec2,
+    /// Button held, or a finger on the glass.
+    pub down: bool,
+    /// Button or finger arrived this frame.
+    pub pressed: bool,
+    /// Wheel delta this frame. Always zero on touch.
+    pub wheel: f32,
+    /// Seconds since the last frame.
+    pub dt: f32,
+}
+
 /// Persistent scroll state for a list/panel region: wheel scrolling while
-/// hovered, a proportional draggable scrollbar, and offset clamping.
+/// hovered, drag-to-scroll with a fling, a proportional draggable scrollbar,
+/// and offset clamping.
 ///
 /// Keep one `ScrollArea` per scrollable region in your state, call
 /// [`update`](Self::update) each frame with the region's rect and total
@@ -24,6 +62,19 @@ use crate::ui::{draw_surface, draw_text_centered_in_box_ex, RectExt, SurfaceStyl
 /// jumping a notch at a time. Under a [`VirtualUi`](crate::ui::VirtualUi) frame,
 /// call [`update_at`](Self::update_at) with the logical mouse instead of
 /// [`update`](Self::update), which reads the raw window mouse.
+///
+/// # Touch
+///
+/// A wheel is a mouse, and a scrollbar handle is eight pixels wide — on a
+/// tablet neither exists, which leaves a list that overflows simply unreadable
+/// past its first panelful. So a press inside the region that travels more than
+/// [`PAN_THRESHOLD`] drags the content directly and carries its momentum on
+/// release.
+///
+/// That gesture starts life indistinguishable from a tap, and both want the
+/// same pixels. **Callers must ask [`absorbs_press`](Self::absorbs_press) before
+/// hit-testing anything inside the region** — otherwise a swipe that lifts over
+/// a button presses it, which is how a scroll gesture buys something.
 #[derive(Debug, Clone, Copy)]
 pub struct ScrollArea {
     /// Rendered (eased) offset — what callers subtract from their content's y.
@@ -31,6 +82,19 @@ pub struct ScrollArea {
     /// Offset the wheel/drag drives; `offset` chases it. Equal once settled.
     target: f32,
     dragging: bool,
+    /// Where a press inside the region landed, until it is lifted. Holds the
+    /// origin, not the latest position, so the threshold measures the whole
+    /// gesture rather than one frame of it.
+    grab: Option<Vec2>,
+    /// Pointer position last frame, for the per-frame drag delta.
+    last: Vec2,
+    /// The press in progress has travelled far enough to be a scroll.
+    panning: bool,
+    /// A pan ended this frame: the release belongs to the gesture, not to
+    /// whatever control sits under the finger.
+    absorbed: bool,
+    /// Drag speed in offset-pixels/second, kept after release as the fling.
+    velocity: f32,
     /// Pixels scrolled per wheel notch.
     pub wheel_speed: f32,
     /// Width of the scrollbar drawn at the region's right edge.
@@ -55,6 +119,11 @@ impl ScrollArea {
             offset: 0.0,
             target: 0.0,
             dragging: false,
+            grab: None,
+            last: Vec2::ZERO,
+            panning: false,
+            absorbed: false,
+            velocity: 0.0,
             wheel_speed: 40.0,
             bar_width: 8.0,
             smoothing: 18.0,
@@ -79,45 +148,142 @@ impl ScrollArea {
         (content_height - view.h).max(0.0)
     }
 
-    /// Handles wheel scrolling while hovered and scrollbar dragging, then eases
-    /// and clamps the offset. Call once per frame before drawing content. Uses
-    /// the raw window mouse — inside a [`VirtualUi`](crate::ui::VirtualUi) frame
-    /// use [`update_at`](Self::update_at) with the logical mouse instead.
+    /// Should controls inside this region ignore the pointer this frame?
+    ///
+    /// True while a drag-scroll is under way, on the frame it ends, and while
+    /// the scrollbar handle is held. A press that became a scroll belongs to the
+    /// scroll: without this a swipe that happens to lift over a button presses
+    /// it, and every list becomes a minefield on a touchscreen.
+    ///
+    /// Ask before hit-testing, not after drawing — the rows should still be
+    /// drawn, just not listening.
+    pub fn absorbs_press(&self) -> bool {
+        self.panning || self.absorbed || self.dragging
+    }
+
+    /// Handles wheel scrolling while hovered, drag-to-scroll, and scrollbar
+    /// dragging, then eases and clamps the offset. Call once per frame before
+    /// drawing content. Uses the raw window mouse — inside a
+    /// [`VirtualUi`](crate::ui::VirtualUi) frame use
+    /// [`update_at`](Self::update_at) with the logical mouse instead.
     pub fn update(&mut self, view: Rect, content_height: f32) {
         self.update_at(view, content_height, Vec2::from(mouse_position()));
     }
 
-    /// Like [`update`](Self::update) but hit-tests hover and the scrollbar handle
-    /// against an explicit `mouse` position, so it works inside a
-    /// [`VirtualUi`](crate::ui::VirtualUi) frame (wheel and button state stay
-    /// global — they carry no coordinates).
+    /// Like [`update`](Self::update) but hit-tests against an explicit `mouse`
+    /// position, so it works inside a [`VirtualUi`](crate::ui::VirtualUi) frame
+    /// (wheel and button state stay global — they carry no coordinates).
+    ///
+    /// A touch arrives here as a mouse: macroquad raises button and motion
+    /// events for it by default, so one path serves both.
     pub fn update_at(&mut self, view: Rect, content_height: f32, mouse: Vec2) {
-        let max_offset = Self::max_offset(view, content_height);
+        let (_, wheel_y) = mouse_wheel();
+        self.update_with(
+            view,
+            content_height,
+            ScrollInput {
+                pointer: mouse,
+                down: is_mouse_button_down(MouseButton::Left),
+                pressed: is_mouse_button_pressed(MouseButton::Left),
+                wheel: wheel_y,
+                dt: get_frame_time(),
+            },
+        );
+    }
 
-        if view.contains(mouse) {
-            let (_, wheel_y) = mouse_wheel();
-            if wheel_y != 0.0 {
-                self.target -= wheel_y.signum() * self.wheel_speed;
-            }
+    /// The whole scroll decision, from explicit input. See
+    /// [`update_at`](Self::update_at) for the version that reads macroquad.
+    pub fn update_with(&mut self, view: Rect, content_height: f32, input: ScrollInput) {
+        let max_offset = Self::max_offset(view, content_height);
+        let dt = input.dt.clamp(0.0, 0.05);
+
+        if max_offset <= 0.0 {
+            // Nothing to scroll: no handle to grab, no content to drag, and no
+            // press to take from the controls underneath.
+            self.dragging = false;
+            self.grab = None;
+            self.panning = false;
+            self.absorbed = false;
+            self.velocity = 0.0;
+            self.target = 0.0;
+            self.offset = 0.0;
+            return;
         }
 
-        if max_offset > 0.0 {
-            let track = self.track_rect(view);
-            if is_mouse_button_pressed(MouseButton::Left) && track.contains(mouse) {
-                self.dragging = true;
-            }
-            if !is_mouse_button_down(MouseButton::Left) {
-                self.dragging = false;
-            }
-            if self.dragging {
-                let handle_h = self.handle_height(view, content_height);
-                let t = ((mouse.y - view.y - handle_h * 0.5) / (view.h - handle_h)).clamp(0.0, 1.0);
-                // Dragging tracks the handle exactly, so settle the easing on it.
-                self.target = t * max_offset;
-                self.offset = self.target;
+        if view.contains(input.pointer) && input.wheel != 0.0 {
+            self.target -= input.wheel.signum() * self.wheel_speed;
+            // A wheel notch mid-fling is a correction, not an addition.
+            self.velocity = 0.0;
+        }
+
+        let track = self.track_rect(view);
+        if input.pressed && track.contains(input.pointer) {
+            self.dragging = true;
+        }
+        if !input.down {
+            self.dragging = false;
+        }
+        if self.dragging {
+            let handle_h = self.handle_height(view, content_height);
+            let t =
+                ((input.pointer.y - view.y - handle_h * 0.5) / (view.h - handle_h)).clamp(0.0, 1.0);
+            // Dragging tracks the handle exactly, so settle the easing on it.
+            self.target = t * max_offset;
+            self.offset = self.target;
+            self.velocity = 0.0;
+        }
+
+        // Drag the content itself. The scrollbar takes precedence: a press in
+        // the gutter is aiming at the handle, not at the list.
+        if input.pressed && !self.dragging && view.contains(input.pointer) {
+            self.grab = Some(input.pointer);
+            self.last = input.pointer;
+            self.velocity = 0.0;
+        }
+
+        if input.down {
+            if let Some(origin) = self.grab {
+                let travel = input.pointer.y - origin.y;
+                if !self.panning && travel.abs() > PAN_THRESHOLD {
+                    self.panning = true;
+                    // Measure from the threshold, not from the origin and not
+                    // from here: the first counts the deadzone as movement and
+                    // makes the content jump, the second throws away everything
+                    // travelled so far and makes a fast flick start from a
+                    // standstill.
+                    self.last.y = origin.y + PAN_THRESHOLD * travel.signum();
+                }
+                if self.panning {
+                    let dy = input.pointer.y - self.last.y;
+                    self.last = input.pointer;
+                    // The content follows the finger: dragging down reveals
+                    // what is above, which is a smaller offset.
+                    self.target -= dy;
+                    self.offset = self.target.clamp(0.0, max_offset);
+                    if dt > 0.0 {
+                        // Smoothed, because the last frame before a lift is
+                        // often a still one and would kill the fling outright.
+                        self.velocity = self.velocity * 0.6 + (-dy / dt) * 0.4;
+                    }
+                }
             }
         } else {
-            self.dragging = false;
+            // Whatever the press was, it is over. A pan keeps its momentum and
+            // claims this frame's release from the controls underneath.
+            self.absorbed = self.panning;
+            self.grab = None;
+            self.panning = false;
+        }
+
+        // Coast. Runs only once the finger is gone, so it never fights a drag.
+        if !input.down && self.velocity != 0.0 {
+            self.target += self.velocity * dt;
+            self.velocity *= (-FLING_DECAY * dt).exp();
+            if self.velocity.abs() < FLING_STOP || self.target <= 0.0 || self.target >= max_offset {
+                // Stop at the end stops rather than pushing at them.
+                self.velocity = 0.0;
+            }
+            self.offset = self.target.clamp(0.0, max_offset);
         }
 
         self.target = self.target.clamp(0.0, max_offset);
@@ -125,7 +291,6 @@ impl ScrollArea {
         // Ease the rendered offset toward the target frame-rate-independently.
         let gap = self.target - self.offset;
         if self.smoothing > 0.0 && gap.abs() > 0.05 {
-            let dt = get_frame_time().clamp(0.0, 0.05);
             self.offset += gap * (1.0 - (-self.smoothing * dt).exp());
         } else {
             self.offset = self.target;
@@ -424,5 +589,159 @@ mod tests {
         assert_eq!(area.offset(), 0.0);
         area.set_offset(120.0);
         assert_eq!(area.offset(), 120.0);
+    }
+
+    const VIEW: Rect = Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 200.0,
+        h: 100.0,
+    };
+    const CONTENT: f32 = 500.0;
+
+    fn at(y: f32, down: bool, pressed: bool) -> ScrollInput {
+        ScrollInput {
+            // Left of the scrollbar gutter, so these are presses on the list.
+            pointer: vec2(50.0, y),
+            down,
+            pressed,
+            wheel: 0.0,
+            dt: 1.0 / 60.0,
+        }
+    }
+
+    /// Press, drag, lift — the gesture the whole feature exists for.
+    #[test]
+    fn dragging_the_content_scrolls_it() {
+        let mut area = ScrollArea::new();
+        area.update_with(VIEW, CONTENT, at(80.0, true, true));
+        assert_eq!(area.offset(), 0.0, "the press alone must not move anything");
+
+        // Up the screen, past the threshold: the content follows the finger.
+        area.update_with(VIEW, CONTENT, at(60.0, true, false));
+        assert!(area.offset() > 0.0, "{}", area.offset());
+        let after_first = area.offset();
+        area.update_with(VIEW, CONTENT, at(40.0, true, false));
+        assert!(area.offset() > after_first, "{}", area.offset());
+    }
+
+    /// The threshold is the whole point: a tap must not scroll.
+    #[test]
+    fn a_press_that_barely_moves_is_not_a_scroll() {
+        let mut area = ScrollArea::new();
+        area.update_with(VIEW, CONTENT, at(80.0, true, true));
+        area.update_with(VIEW, CONTENT, at(80.0 - PAN_THRESHOLD + 1.0, true, false));
+        assert_eq!(area.offset(), 0.0);
+        assert!(!area.absorbs_press());
+    }
+
+    /// The gesture and the controls under it want the same pixels, and the
+    /// scroll wins — a swipe that lifts over a button must not press it.
+    #[test]
+    fn a_swipe_takes_the_release_from_the_controls_underneath() {
+        let mut area = ScrollArea::new();
+        area.update_with(VIEW, CONTENT, at(80.0, true, true));
+        area.update_with(VIEW, CONTENT, at(40.0, true, false));
+        assert!(area.absorbs_press(), "mid-drag");
+
+        // The lift itself: still absorbed, because this is the frame the button
+        // underneath would otherwise fire on.
+        area.update_with(VIEW, CONTENT, at(40.0, false, false));
+        assert!(area.absorbs_press(), "on release");
+
+        // And released again the next frame, or nothing would ever be clickable.
+        area.update_with(VIEW, CONTENT, at(40.0, false, false));
+        assert!(!area.absorbs_press(), "the frame after");
+    }
+
+    #[test]
+    fn a_tap_leaves_the_press_for_the_controls_underneath() {
+        let mut area = ScrollArea::new();
+        area.update_with(VIEW, CONTENT, at(80.0, true, true));
+        area.update_with(VIEW, CONTENT, at(80.0, false, false));
+        assert!(!area.absorbs_press());
+    }
+
+    #[test]
+    fn a_released_drag_coasts_and_then_stops() {
+        let mut area = ScrollArea::new();
+        area.update_with(VIEW, CONTENT, at(90.0, true, true));
+        for step in 1..=4 {
+            area.update_with(VIEW, CONTENT, at(90.0 - step as f32 * 20.0, true, false));
+        }
+        let at_release = area.offset();
+        area.update_with(VIEW, CONTENT, at(10.0, false, false));
+        assert!(area.offset() > at_release, "the fling should carry on");
+
+        // And settle, rather than creeping forever.
+        for _ in 0..600 {
+            area.update_with(VIEW, CONTENT, at(10.0, false, false));
+        }
+        let settled = area.offset();
+        area.update_with(VIEW, CONTENT, at(10.0, false, false));
+        assert_eq!(area.offset(), settled);
+    }
+
+    #[test]
+    fn a_fling_stops_at_the_end_of_the_content() {
+        let mut area = ScrollArea::new();
+        area.update_with(VIEW, CONTENT, at(95.0, true, true));
+        for step in 1..=8 {
+            area.update_with(VIEW, CONTENT, at(95.0 - step as f32 * 11.0, true, false));
+        }
+        for _ in 0..600 {
+            area.update_with(VIEW, CONTENT, at(5.0, false, false));
+        }
+        assert!(area.offset() <= ScrollArea::max_offset(VIEW, CONTENT) + 0.01);
+        assert!(area.offset() >= 0.0);
+    }
+
+    /// Content that fits has nothing to scroll, so it must not eat presses —
+    /// otherwise a short list becomes unclickable for the price of a feature it
+    /// never uses.
+    #[test]
+    fn a_region_with_nothing_to_scroll_never_absorbs_a_press() {
+        let mut area = ScrollArea::new();
+        area.update_with(VIEW, 60.0, at(80.0, true, true));
+        area.update_with(VIEW, 60.0, at(20.0, true, false));
+        assert_eq!(area.offset(), 0.0);
+        assert!(!area.absorbs_press());
+    }
+
+    /// A press in the right-edge gutter is aiming at the handle, and dragging
+    /// it must still track the handle rather than the content — the two read
+    /// opposite ways round.
+    #[test]
+    fn the_scrollbar_handle_still_wins_the_gutter() {
+        let mut area = ScrollArea::new();
+        let gutter = ScrollInput {
+            pointer: vec2(VIEW.right() - 2.0, 90.0),
+            down: true,
+            pressed: true,
+            wheel: 0.0,
+            dt: 1.0 / 60.0,
+        };
+        area.update_with(VIEW, CONTENT, gutter);
+        // Handle dragged to the bottom of the track: the end of the content,
+        // where content-dragging the same way would have gone to the start.
+        assert!(area.offset() > ScrollArea::max_offset(VIEW, CONTENT) * 0.5);
+        assert!(area.absorbs_press());
+    }
+
+    #[test]
+    fn the_wheel_still_scrolls_for_a_mouse() {
+        let mut area = ScrollArea::new();
+        area.update_with(
+            VIEW,
+            CONTENT,
+            ScrollInput {
+                pointer: vec2(50.0, 50.0),
+                down: false,
+                pressed: false,
+                wheel: -1.0,
+                dt: 1.0 / 60.0,
+            },
+        );
+        assert!(area.offset() > 0.0);
     }
 }
