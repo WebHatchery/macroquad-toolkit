@@ -151,6 +151,31 @@ impl Region {
         Self::push(rect, Some(behind))
     }
 
+    /// Has this surface hidden that text, or cut across it?
+    ///
+    /// Both are "partly covered", and only one is a fault. A panel whose left
+    /// edge lands mid-label hides the tail of it and shows whole glyphs up to
+    /// the edge — ordinary layering, and reporting it buries the real findings
+    /// in noise. A panel whose *top or bottom* edge lands inside the line cuts
+    /// every glyph in half, and the player reads a row of severed letters.
+    ///
+    /// Centring was the old proxy for this and got both wrong: a title sliced
+    /// through the middle by an overlay went unreported for as long as its
+    /// centre stayed outside the panel, which is exactly how three overlays
+    /// came to be drawn across the cabinet name.
+    fn hidden_by(surface: Rect, text: Rect) -> bool {
+        let touches = surface.x < text.right()
+            && surface.right() > text.x
+            && surface.y < text.bottom()
+            && surface.bottom() > text.y;
+        if !touches {
+            return false;
+        }
+        let cuts_across = (surface.y > text.y && surface.y < text.bottom())
+            || (surface.bottom() > text.y && surface.bottom() < text.bottom());
+        !cuts_across
+    }
+
     fn push(rect: Rect, behind: Option<Color>) -> Self {
         STATE.with(|state| {
             let mut state = state.borrow_mut();
@@ -161,7 +186,7 @@ impl Region {
             // panel at all (§5.47).
             if behind.is_some() {
                 super::pointer::occlude(rect);
-                state.drawn.retain(|d| !rect.contains(d.rect.center()));
+                state.drawn.retain(|d| !Self::hidden_by(rect, d.rect));
             }
             state.stack.push(Bounds { rect, behind });
         });
@@ -584,6 +609,38 @@ mod tests {
             note_contrast("outlined", Color::new(0.0, 0.0, 0.0, 0.75), 14.0);
         }
         assert!(take_audit().is_empty());
+    }
+
+    /// A modal's edge landing mid-label hides the tail of it. That is what an
+    /// overlay is for, and it must not be reported.
+    #[test]
+    fn a_panel_edge_that_hides_the_tail_of_a_label_is_not_a_finding() {
+        let label = Rect::new(30.0, 100.0, 110.0, 20.0);
+        let panel = Rect::new(90.0, 96.0, 1100.0, 500.0);
+        assert!(Region::hidden_by(panel, label));
+    }
+
+    /// A modal's *top* edge landing inside the line severs every glyph, which
+    /// is what three overlays were doing to the cabinet name unnoticed.
+    #[test]
+    fn a_panel_edge_that_cuts_across_a_line_is_a_finding() {
+        let title = Rect::new(26.0, 28.0, 304.0, 38.0);
+        let panel = Rect::new(180.0, 44.0, 920.0, 632.0);
+        assert!(!Region::hidden_by(panel, title));
+        // And from below, which severs the tops of the letters instead.
+        let from_below = Rect::new(180.0, -200.0, 920.0, 240.0);
+        assert!(!Region::hidden_by(from_below, title));
+    }
+
+    #[test]
+    fn a_surface_that_covers_a_label_outright_hides_it() {
+        let label = Rect::new(200.0, 300.0, 80.0, 18.0);
+        assert!(Region::hidden_by(
+            Rect::new(100.0, 200.0, 600.0, 400.0),
+            label
+        ));
+        // And one nowhere near it neither hides nor cuts.
+        assert!(!Region::hidden_by(Rect::new(0.0, 0.0, 50.0, 50.0), label));
     }
 
     #[test]
