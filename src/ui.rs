@@ -3,6 +3,7 @@
 mod bounds;
 mod contrast;
 mod font;
+mod format;
 mod forms;
 mod hover_tooltip;
 mod layout;
@@ -22,6 +23,7 @@ pub use contrast::{
     darken_until, flatten, passes as contrast_passes, ratio as contrast_ratio, Level,
 };
 pub use font::*;
+pub use format::*;
 pub use forms::*;
 pub use hover_tooltip::*;
 pub use layout::*;
