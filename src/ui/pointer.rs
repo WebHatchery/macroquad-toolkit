@@ -78,6 +78,18 @@ fn logical_touch(position: Vec2, dpi: f32) -> Vec2 {
     }
 }
 
+/// Is the finger still there? A touch has no separate "button down" to read, so
+/// being on the glass is being pressed.
+///
+/// The phase that is easy to forget is `Cancelled` — the system taking the
+/// gesture away, which iOS does for a pinch, an edge swipe, or a notification
+/// sliding in. It is not a lift and must not act like one, but it is not a
+/// finger either: treating it as held left the last thing under it drawn as
+/// pressed for a frame after the player had lost the gesture entirely.
+fn finger_is_on_the_glass(phase: TouchPhase) -> bool {
+    !matches!(phase, TouchPhase::Ended | TouchPhase::Cancelled)
+}
+
 impl Pointer {
     /// Read this frame's input, preferring a touch when one is present.
     ///
@@ -96,9 +108,7 @@ impl Pointer {
             return Self {
                 position: to_logical(logical_touch(touch.position, dpi)),
                 released: matches!(touch.phase, TouchPhase::Ended),
-                // A finger on the glass is a button held; there is no separate
-                // state to read.
-                down: !matches!(touch.phase, TouchPhase::Ended),
+                down: finger_is_on_the_glass(touch.phase),
                 hovering: false,
             };
         }
@@ -673,6 +683,17 @@ mod tests {
     fn a_nonsense_scale_is_ignored_rather_than_dividing_by_zero() {
         let raw = vec2(100.0, 50.0);
         assert_eq!(logical_touch(raw, 0.0), raw);
+    }
+
+    #[test]
+    fn a_finger_is_held_until_it_lifts_or_is_taken_away() {
+        assert!(finger_is_on_the_glass(TouchPhase::Started));
+        assert!(finger_is_on_the_glass(TouchPhase::Moved));
+        assert!(finger_is_on_the_glass(TouchPhase::Stationary));
+        assert!(!finger_is_on_the_glass(TouchPhase::Ended));
+        // The one that is easy to miss: the system took the gesture, so there
+        // is nothing on the glass even though nobody lifted anything.
+        assert!(!finger_is_on_the_glass(TouchPhase::Cancelled));
     }
 
     #[test]
