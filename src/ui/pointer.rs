@@ -52,17 +52,49 @@ pub struct Pointer {
     pub hovering: bool,
 }
 
+/// Put a touch in the same units as the cursor.
+///
+/// macroquad reports the two differently and says so nowhere:
+/// `mouse_position()` divides by the DPI scale before returning, and
+/// `touches()` hands back the raw framebuffer coordinate the platform gave it.
+/// On a desktop at 100% the scale is 1 and the difference does not exist, which
+/// is why this survived every test on the machine it was written on.
+///
+/// A tablet is the case that finds it. An iPad reports `devicePixelRatio` 2, so
+/// a finger on a control at logical (300, 200) arrives as (600, 400) — off the
+/// control, usually off the screen. Every hit test then fails while the *drawn*
+/// UI, which is laid out in logical pixels, looks perfectly fine.
+///
+/// The symptom is worth writing down because it points away from the cause: the
+/// button lights up anyway. macroquad synthesises a mouse from the touch, and
+/// that path *is* divided, so the frame after the finger lifts the control is
+/// hovered at the right place and stays lit — a press that visibly registers
+/// and does nothing.
+fn logical_touch(position: Vec2, dpi: f32) -> Vec2 {
+    if dpi > 0.0 {
+        position / dpi
+    } else {
+        position
+    }
+}
+
 impl Pointer {
     /// Read this frame's input, preferring a touch when one is present.
     ///
     /// `to_logical` maps screen coordinates into the game's own space, so this
     /// does not need to know how the virtual frame is scaled.
     pub fn read(to_logical: impl Fn(Vec2) -> Vec2) -> Self {
+        Self::read_at_dpi(to_logical, screen_dpi_scale())
+    }
+
+    /// [`Self::read`] with the DPI scale injected, so the conversion can be
+    /// tested without a live macroquad context.
+    pub fn read_at_dpi(to_logical: impl Fn(Vec2) -> Vec2, dpi: f32) -> Self {
         // A touch wins when both are present: a browser that synthesises mouse
         // events from taps would otherwise fire the same control twice.
         if let Some(touch) = touches().first() {
             return Self {
-                position: to_logical(touch.position),
+                position: to_logical(logical_touch(touch.position, dpi)),
                 released: matches!(touch.phase, TouchPhase::Ended),
                 // A finger on the glass is a button held; there is no separate
                 // state to read.
@@ -614,6 +646,33 @@ mod tests {
         let finger = Pointer::default();
         assert!(mouse.hovering);
         assert!(!finger.hovering);
+    }
+
+    /// The fault a tablet found: a touch arrives in physical pixels and the
+    /// cursor in logical ones, so on a 2x screen every finger landed twice as
+    /// far into the layout as it really was.
+    #[test]
+    fn a_touch_is_brought_into_the_same_units_as_the_cursor() {
+        // What the platform hands over on an iPad for a finger at (300, 200).
+        assert_eq!(logical_touch(vec2(600.0, 400.0), 2.0), vec2(300.0, 200.0));
+        // A 3x phone screen, and a 150% desktop.
+        assert_eq!(logical_touch(vec2(900.0, 600.0), 3.0), vec2(300.0, 200.0));
+        assert_eq!(logical_touch(vec2(450.0, 300.0), 1.5), vec2(300.0, 200.0));
+    }
+
+    #[test]
+    fn an_unscaled_display_is_left_exactly_alone() {
+        // The case every desktop is in, and the reason this went unnoticed.
+        let raw = vec2(317.0, 42.5);
+        assert_eq!(logical_touch(raw, 1.0), raw);
+    }
+
+    /// A scale of zero would silently teleport every touch to infinity. Nothing
+    /// should report one, but a hit test is not the place to find out.
+    #[test]
+    fn a_nonsense_scale_is_ignored_rather_than_dividing_by_zero() {
+        let raw = vec2(100.0, 50.0);
+        assert_eq!(logical_touch(raw, 0.0), raw);
     }
 
     #[test]
