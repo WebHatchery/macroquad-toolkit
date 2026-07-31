@@ -2,6 +2,13 @@
 
 A collection of common utilities for Macroquad game development, extracted from multiple games to reduce duplication and provide consistent patterns.
 
+> **`MACROQUAD_TOOLKIT.md` is the fuller module reference** and is kept in sync
+> across every game in the catalog from `rust_management/docs/`. It covers the
+> modules this file does not — math, timing, fx, form widgets, scroll and tabs,
+> settings, achievements, the debug overlay, raster, and the capture harness.
+> This README keeps the sections that live only here: the text layout rule, and
+> persistence, audio, states, and the optional `db` feature.
+
 ## Features
 
 - **Input utilities**: Mouse hovering, clicking, rectangle collision detection

@@ -8,17 +8,14 @@ A collection of common utilities for Macroquad game development, extracted from 
 - **UI rendering**: Buttons (with press/release variants), panels, progress bars
 - **Asset management**: Texture loading and caching
 - **Camera2D**: Pan and zoom for 2D games
-- **Audio**: `SoundManager` keyed SFX playback with volume scaling and asset packs
 - **Event bus**: Generic event system for decoupled game logic
 - **Color palettes**: Consistent dark theme colors
 - **Sprite system**: Builder pattern for texture rendering with transformations
 - **Screenshot capture**: Env-var-driven headless capture harness for visual verification
 - **Color helpers**: `with_alpha`, `lighten`/`darken`, `mix`, HSV conversion, hue shift
-- **Math**: lerp/smoothstep/approach, easing curves, time-based pulse, `Tween`
+- **Math**: lerp/smoothstep/approach, easing curves, time-based pulse, square-wave `blink`, `Tween`
 - **Timing**: `Cooldown`, `Timer`, `IntervalTimer`, `Timeline` phase sequencer
-- **FX**: trauma screen shake, screen fades, pooled particles, floating text
-- **Typewriter / streaming text**: per-char reveal, shared-budget `BlockReveal`
-- **Number formatting**: money, compact/idle-magnitude amounts and rates, clocks/timers
+- **FX**: trauma screen shake, screen fades, pooled particles, floating text, terminal typewriter (single string + `reveal_block` for multi-line streams)
 - **Form widgets**: toggle, checkbox, slider, stepper, segmented bar, keycap
 - **Scroll & tabs**: `ScrollArea` with drawn scrollbar, tab bars / nav columns
 - **Settings**: shared `GameSettings` (volume groups, fullscreen, UI scale) with persistence
@@ -143,6 +140,18 @@ if let Some(tex) = assets.get_texture("player") {
 }
 ```
 
+**JPEG is supported.** Macroquad itself compiles `image` with only the `png` and `tga`
+decoders, so `macroquad::load_texture` fails on `.jpg`. The toolkit adds a JPEG decoder and
+routes every load path (`load_texture`, `load_texture_filtered`, `AssetPack::texture`,
+`load_texture_from_pack_or_file`) through `assets::decode_texture_bytes`, which detects JPEG by
+magic bytes and falls back to Macroquad for everything else. Loose files are detected by
+`.jpg`/`.jpeg` extension.
+
+Prefer JPEG for large opaque art — photographic/painterly backgrounds and maps compress
+10x better than lossless PNG, and PNG-in-ZIP saves nothing because the data is already
+deflate-incompressible. **JPEG has no alpha channel**, so keep anything with transparency
+(sprites, UI chrome, icons) as PNG. Verify with an alpha-channel audit before bulk-converting.
+
 ### Camera (`camera` module)
 
 ```rust
@@ -156,24 +165,6 @@ camera.update(get_frame_time(), false);
 // Convert coordinates
 let world_pos = camera.screen_to_world(mouse_position().into());
 let screen_pos = camera.world_to_screen(world_pos);
-```
-
-### Audio (`audio` module)
-
-`SoundManager<T>` plays sound effects keyed by a game-defined id enum, scaling
-each play by a volume multiplier (wire it to `GameSettings::effective_sfx_volume()`).
-Sounds are registered directly or pulled from an `AssetPack`.
-
-```rust
-use macroquad_toolkit::audio::{SoundManager, SoundId};
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-enum Sfx { Hit, Coin }
-impl SoundId for Sfx {}
-
-let mut sounds: SoundManager<Sfx> = SoundManager::new();
-sounds.add_asset_pack(pack);              // or register sounds individually
-sounds.play_sfx(Sfx::Hit, settings.effective_sfx_volume());
 ```
 
 ### Events (`events` module)
@@ -238,10 +229,11 @@ Interpolation and easing primitives — use these instead of private `lerp`/`eas
 ```rust
 use macroquad_toolkit::math::{lerp, inv_lerp, remap, smoothstep, approach, exp_approach,
                               ease_out_cubic, ease_out_back, pulse01, pulse_range, bob,
-                              hash_str, Tween};
+                              blink, hash_str, Tween};
 
 let x = lerp(a, b, t);
 let glow = pulse_range(3.0, 0.55, 0.77);   // replaces (get_time()*k).sin() idioms
+let caret = if blink(elapsed, 2.5) { "_" } else { "" }; // square-wave cursor blink
 let mut slide = Tween::new(0.0, 8.0);      // exponential ease-toward-target
 slide.set_target(panel_x);
 slide.update(dt);
@@ -310,25 +302,25 @@ for impact in projectiles.update(dt) { apply_damage(impact); }
 for p in projectiles.iter() { draw_at(p.position(), p.progress()); }
 ```
 
-Typewriter / streaming-text helpers reveal text a character at a time (dialogue,
-terminal boot logs, killfeeds). The single-string helpers reveal each string
-independently; `BlockReveal` streams a block of lines against one shared
-character budget so line `N` only starts once lines `0..N` are fully shown.
+Terminal-style character reveal — given the full text, seconds elapsed, and a
+chars-per-second rate, these return how much should be visible (a non-positive
+rate reveals everything, handy for capture/accessibility). Counting is by
+`char`, so multi-byte UTF-8 never splits:
 
 ```rust
 use macroquad_toolkit::fx::{typed_prefix, is_fully_typed, prefix_chars, reveal_block};
 
-// One string, char-by-char:
-let shown = typed_prefix(line, elapsed, 30.0);   // valid &str slice
-draw_ui_text(shown, x, y, 20.0, dark::TEXT);
-if is_fully_typed(line, elapsed, 30.0) { /* advance */ }
+let shown = typed_prefix(line, elapsed, 40.0);          // one string
+if !is_fully_typed(line, elapsed, 40.0) { /* draw caret */ }
 
-// A block of lines as one continuous stream:
-let reveal = reveal_block(&lines, elapsed, 40.0);
+// A whole block streamed as one shared budget (boot log, console output):
+// line N only starts once lines 0..N are fully shown.
+let r = reveal_block(&lines, elapsed, 170.0);
 for (i, line) in lines.iter().enumerate() {
-    draw_ui_text(prefix_chars(line, reveal.shown[i]), x, y + i as f32 * 18.0, 16.0, dark::TEXT);
+    draw(prefix_chars(line, r.shown[i]));               // visible prefix per line
 }
-// reveal.cursor_line / reveal.complete drive a blinking write-cursor.
+// Park a blinking caret at the write head (or final glyph once complete):
+if i == r.cursor_line && blink(elapsed, 3.0) { draw_caret(); }
 ```
 
 ### Form widgets, scroll, and tabs (`ui` module)
@@ -424,21 +416,8 @@ if is_key_pressed(KeyCode::F3) { overlay.toggle(); }
 overlay.draw(&[format!("entities: {}", count)]);
 ```
 
-Number, time, and string formatting live in `ui` — use these instead of
-hand-rolled `format!` idioms:
-
-```rust
-use macroquad_toolkit::ui::{format_money, format_compact_money, format_amount,
-                            format_rate, format_mmss, format_hmmss, format_clock};
-
-format_money(1_234)        // "$1,234"
-format_compact_money(2_500) // compact i64 currency (saturates ~9.2e18)
-format_amount(1_500.0)     // "1.50K" — idle/incremental magnitudes to 1e30, then sci notation
-format_rate(12_500.0)      // "12.50K" per-second rate with the same suffixes
-format_mmss(462.0)         // "07:42" (minutes grow past an hour)
-format_hmmss(secs)         // "H:MM:SS" once an hour is reached
-format_clock(8, 30)        // "08:30" in-game clock, hours wrap at 24
-```
+Time formatting lives beside the money formatters in `ui`:
+`format_mmss(secs)`, `format_hmmss(secs)`, `format_clock(hour, minute)`.
 
 ### RNG (`rng` module)
 
@@ -583,162 +562,6 @@ directory it needs no arguments:
 Pass `-Prefix` if the game's env-var prefix differs from its package name
 (e.g. `carriage_run` uses `CARRIAGE`). See `carriage_run` for a reference
 integration, including a thin per-game `scripts/capture_ui.ps1` wrapper.
-
-### Notifications (`notifications` module)
-
-Queue-based toast notifications with fade-out and typed styling.
-
-```rust
-use macroquad_toolkit::notifications::{NotificationManager, NotificationRenderConfig};
-
-let mut notifications = NotificationManager::new();   // keep in Game
-notifications.success("Saved");
-notifications.warning("Low health");
-notifications.info("New quest");
-
-notifications.update(get_frame_time());
-notifications.draw();                                  // or draw_with_config(&cfg)
-```
-
-### States (`states` module)
-
-A `GameState<T>` trait standardizing what a screen looks like (`update`/`draw`
-plus `on_enter`/`on_exit` hooks) and a `Transition` enum. Most games still drive
-their own top-level `GameState` enum with explicit matching (see
-`CODE_STANDARDS.md` §5.4) — reach for this only when a trait-object screen stack
-fits better.
-
-```rust
-use macroquad_toolkit::states::{GameState, Transition};
-
-impl GameState<Game> for MenuScreen {
-    fn update(&mut self, game: &mut Game) -> Option<Box<dyn std::any::Any>> {
-        if start_clicked { Some(Box::new(Transition::Switch)) } else { None }
-    }
-    fn draw(&self, game: &Game) { /* render */ }
-}
-```
-
-### Data loading (`data_loader` module)
-
-Helpers for loading JSON game data — embedded at compile time via `include_str!`
-(WASM-safe) or from disk at runtime, plus a keyed `DataRegistry<T>`.
-
-```rust
-use macroquad_toolkit::data_loader::{load_embedded_json, load_json_with_fallback_sync};
-
-// Compile-time embed (works on WASM):
-let config: Config = load_embedded_json(include_str!("../assets/config.json"))?;
-
-// Native: read assets/ from disk, fall back to the embedded copy:
-let config: Config = load_json_with_fallback_sync(
-    "assets/config.json",
-    include_str!("../assets/config.json"),
-)?;
-```
-
-### Persistence (`persistence` module)
-
-Save/load with native (JSON files) and WASM (`localStorage`) backends behind one
-keyed API. Use the `*_json_key(game_name, key, ..)` helpers or implement
-`JsonStorage` for slot-based saves; also provides named save slots (`slots`),
-atomic file writes, versioned migration (`version`), and `AutoSaveManager` for
-interval autosaves.
-
-```rust
-use macroquad_toolkit::persistence::{JsonStorage, save_json_key, load_json_key, AutoSaveManager};
-
-#[derive(Serialize, Deserialize)]
-struct SaveData { level: u32 }
-impl JsonStorage for SaveData {}
-
-// Keyed helpers (native file or WASM localStorage, chosen at compile time):
-save_json_key("my_game", "save", &data).ok();
-let data: Result<SaveData, String> = load_json_key("my_game", "save");
-
-// Or via the trait's slot methods:
-data.save_to_slot("my_game", "slot1").ok();
-
-// Autosave: call every frame; the closure runs only when the interval elapses.
-let mut autosave = AutoSaveManager::new(30.0);   // seconds between autosaves
-autosave.update(get_frame_time(), dirty, || save_json_key("my_game", "auto", &data)).ok();
-```
-
-### Entities (`entities` module)
-
-A lightweight generic entity store (`EntityManager<T>`) with opt-in
-`HasPosition` / `HasHealth` / `HasStatusEffects` traits for spatial queries,
-damage, and timed status effects — suited to grid/strategy games that don't need
-a full ECS.
-
-```rust
-use macroquad_toolkit::entities::{EntityManager, HasPosition};
-
-let mut entities: EntityManager<Unit> = EntityManager::new();
-let id = entities.spawn(Unit::new());
-if let Some(unit) = entities.get_mut(id) { unit.hp -= 5; }
-entities.remove(id);
-```
-
-### Grid (`grid` module)
-
-Tile-grid data structures and coordinate math: `Grid<T>` and `FlatGrid`, a
-`TilePos` type, isometric ↔ world conversion, fog-of-war state, line-of-sight /
-vision-radius queries, and BFS pathfinding / flood fill over tiles.
-
-```rust
-use macroquad_toolkit::grid::{Grid, TilePos, bfs_path, has_line_of_sight, world_to_iso};
-
-let mut tiles: Grid<Tile> = Grid::new(width, height, Tile::Floor);
-tiles.set(TilePos::new(3, 4), Tile::Wall);
-
-let path = bfs_path(start, goal, false, |p| tiles.get(p) != Some(&Tile::Wall), |_| true);
-// predicate returns true when a tile *blocks* vision:
-let visible = has_line_of_sight(from, to, |p| tiles.get(p) == Some(&Tile::Wall));
-```
-
-### Pathfinding (`pathfinding` module)
-
-A* pathfinding over a weighted `PathfindingGrid` (`Pos` coordinates), with
-4/8-way movement, per-tile costs, selectable heuristics, and an optional
-`PathCache`. Distinct from `grid::bfs_path`, which is unweighted BFS over
-`TilePos`.
-
-```rust
-use macroquad_toolkit::pathfinding::{PathfindingGrid, Pos, find_path, Heuristic};
-
-let mut grid = PathfindingGrid::new(64, 64);
-grid.set_walkable(Pos { x: 10, y: 5 }, false);
-
-if let Some(path) = find_path(start, goal, &grid, Heuristic::Manhattan, false) {
-    let next = path.next_after(current);   // step-follow the waypoints
-}
-```
-
-### 3D rendering (`render3d` module)
-
-Billboards (camera-facing 2D sprites in 3D space) and camera helpers
-(`IsometricCamera`, `OrbitCamera`) for tile/strategy 3D views. See also
-`prelude_3d`.
-
-```rust
-use macroquad_toolkit::render3d::{draw_billboard, IsometricCamera};
-
-let mut camera = IsometricCamera::new(0.0, 0.0);
-camera.update(get_frame_time());
-// ...set_camera(&camera.into())..., then:
-draw_billboard(world_pos, vec2(1.0, 1.0), &texture, camera_position);
-```
-
-### Database (`db` module, optional)
-
-SQLite access via `sqlx`, gated behind the `db` cargo feature (off by default —
-enable with `features = ["db"]`). Most games don't need it; it exists for tools
-and servers that back onto a database.
-
-```toml
-macroquad-toolkit = { path = "../macroquad-toolkit", features = ["db"] }
-```
 
 ## Button Click Semantics
 
