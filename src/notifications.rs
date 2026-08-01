@@ -144,19 +144,41 @@ impl Notification {
 pub const DEFAULT_DURATION: f32 = 4.0;
 /// Maximum number of notifications to display at once
 pub const MAX_NOTIFICATIONS: usize = 5;
+/// How many raised notifications the manager remembers after they fade.
+pub const MAX_HISTORY: usize = 200;
 
 /// Manages the notification queue
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NotificationManager {
     notifications: Vec<Notification>,
+    /// Everything that has been raised, oldest first, whether or not it is
+    /// still on screen. A toast the player was not looking at is otherwise
+    /// gone for good, which is a poor way to deliver the only copy of a
+    /// message.
+    #[serde(default)]
+    history: Vec<LoggedNotification>,
     #[serde(skip, default = "default_max_notifications")]
     max_notifications: usize,
+    #[serde(skip, default = "default_max_history")]
+    max_history: usize,
     #[serde(skip, default = "default_notification_duration")]
     default_duration: f32,
 }
 
+/// A notification as it is remembered: the message and how it was meant,
+/// without the timers that only matter while it is on screen.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LoggedNotification {
+    pub message: String,
+    pub notification_type: NotificationType,
+}
+
 fn default_max_notifications() -> usize {
     MAX_NOTIFICATIONS
+}
+
+fn default_max_history() -> usize {
+    MAX_HISTORY
 }
 
 fn default_notification_duration() -> f32 {
@@ -168,7 +190,9 @@ impl NotificationManager {
     pub fn new() -> Self {
         Self {
             notifications: Vec::new(),
+            history: Vec::new(),
             max_notifications: MAX_NOTIFICATIONS,
+            max_history: MAX_HISTORY,
             default_duration: DEFAULT_DURATION,
         }
     }
@@ -177,7 +201,9 @@ impl NotificationManager {
     pub fn with_settings(max_notifications: usize, default_duration: f32) -> Self {
         Self {
             notifications: Vec::new(),
+            history: Vec::new(),
             max_notifications,
+            max_history: MAX_HISTORY,
             default_duration,
         }
     }
@@ -195,6 +221,17 @@ impl NotificationManager {
         duration: f32,
     ) {
         let notification = Notification::new(message.into(), notification_type, duration);
+        if self.max_history > 0 {
+            self.history.push(LoggedNotification {
+                message: notification.message.clone(),
+                notification_type,
+            });
+            // Oldest out first: a log that drops the newest entry is a log of
+            // the wrong end of the session.
+            while self.history.len() > self.max_history {
+                self.history.remove(0);
+            }
+        }
         self.notifications.push(notification);
 
         // Trim oldest if over limit
@@ -233,6 +270,26 @@ impl NotificationManager {
         self.notifications.retain(|n| n.time_remaining > 0.0);
     }
 
+    /// Everything raised so far, oldest first, whether or not it is still on
+    /// screen. Bounded by [`MAX_HISTORY`] unless told otherwise.
+    pub fn history(&self) -> &[LoggedNotification] {
+        &self.history
+    }
+
+    /// How much history to keep. Zero keeps none, which is what a manager
+    /// used purely for toasts wants.
+    pub fn set_history_limit(&mut self, limit: usize) {
+        self.max_history = limit;
+        while self.history.len() > self.max_history {
+            self.history.remove(0);
+        }
+    }
+
+    /// Forget everything raised so far. Does not touch what is on screen.
+    pub fn clear_history(&mut self) {
+        self.history.clear();
+    }
+
     /// Get all active notifications for rendering
     pub fn get_notifications(&self) -> &[Notification] {
         &self.notifications
@@ -254,6 +311,8 @@ impl NotificationManager {
     }
 
     /// Clear all notifications
+    /// Dismiss everything on screen. The history is kept: clearing the toasts
+    /// is a display decision, not an instruction to forget what happened.
     pub fn clear(&mut self) {
         self.notifications.clear();
     }
@@ -349,6 +408,57 @@ pub fn draw_notification(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn history_keeps_what_the_toasts_let_go_of() {
+        let mut manager = NotificationManager::new();
+        manager.success("first");
+        manager.warning("second");
+        // Long enough that both toasts are gone from the screen.
+        manager.update(100.0);
+
+        assert!(manager.is_empty(), "the toasts should have faded");
+        assert_eq!(manager.history().len(), 2);
+        assert_eq!(manager.history()[0].message, "first");
+        assert_eq!(
+            manager.history()[1].notification_type,
+            NotificationType::Warning
+        );
+    }
+
+    #[test]
+    fn history_drops_the_oldest_entry_rather_than_the_newest() {
+        let mut manager = NotificationManager::new();
+        manager.set_history_limit(2);
+        for message in ["one", "two", "three"] {
+            manager.info(message);
+        }
+
+        let messages: Vec<&str> = manager
+            .history()
+            .iter()
+            .map(|entry| entry.message.as_str())
+            .collect();
+        assert_eq!(messages, ["two", "three"]);
+    }
+
+    #[test]
+    fn a_manager_told_to_keep_nothing_keeps_nothing() {
+        let mut manager = NotificationManager::new();
+        manager.set_history_limit(0);
+        manager.info("gone");
+        assert!(manager.history().is_empty());
+        assert_eq!(manager.count(), 1, "it is still a toast");
+    }
+
+    #[test]
+    fn dismissing_the_toasts_does_not_forget_what_happened() {
+        let mut manager = NotificationManager::new();
+        manager.info("something");
+        manager.clear();
+        assert!(manager.is_empty());
+        assert_eq!(manager.history().len(), 1);
+    }
 
     #[test]
     fn test_notification_opacity() {
