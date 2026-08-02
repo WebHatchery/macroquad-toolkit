@@ -101,6 +101,24 @@ impl SeededRng {
             Some(&slice[self.below(slice.len())])
         }
     }
+
+    /// Uniform integer in [low, high). Returns `low` when the range is empty,
+    /// matching the module-level `gen_range` convention.
+    pub fn range_i32(&mut self, low: i32, high: i32) -> i32 {
+        if high <= low {
+            low
+        } else {
+            low + self.below((high - low) as usize) as i32
+        }
+    }
+
+    /// Shuffle a slice in place (Fisher-Yates), drawing from this stream.
+    pub fn shuffle<T>(&mut self, slice: &mut [T]) {
+        for i in (1..slice.len()).rev() {
+            let j = self.below(i + 1);
+            slice.swap(i, j);
+        }
+    }
 }
 
 /// Generate a random float between 0.0 and 1.0 (exclusive)
@@ -224,6 +242,30 @@ mod tests {
             let value = rng.next_f32();
             assert!((0.0..=1.0).contains(&value));
         }
+    }
+
+    #[test]
+    fn range_i32_respects_bounds_and_survives_empty_ranges() {
+        let mut rng = SeededRng::new(5);
+        assert_eq!(rng.range_i32(3, 3), 3);
+        assert_eq!(rng.range_i32(5, 2), 5);
+        for _ in 0..128 {
+            let value = rng.range_i32(-2, 4);
+            assert!((-2..4).contains(&value));
+        }
+    }
+
+    #[test]
+    fn shuffle_is_a_repeatable_permutation() {
+        let mut first: Vec<u32> = (0..10).collect();
+        let mut second: Vec<u32> = (0..10).collect();
+        SeededRng::new(9).shuffle(&mut first);
+        SeededRng::new(9).shuffle(&mut second);
+        assert_eq!(first, second, "the same seed must shuffle the same way");
+
+        let mut sorted = first.clone();
+        sorted.sort_unstable();
+        assert_eq!(sorted, (0..10).collect::<Vec<u32>>(), "elements were lost");
     }
 }
 
