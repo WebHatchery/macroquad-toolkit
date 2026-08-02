@@ -43,6 +43,7 @@
 //! - [`audio`] - Audio playback utilities
 //! - [`events`] - Event handling utilities
 //! - [`capture`] - Headless screenshot capture harness (env-var driven)
+//! - [`source_gate`] - 800-line source-file gate (CODE_STANDARDS §2.2) run under `cargo test`
 //! - [`db`] - Database support (optional, requires `db` feature)
 
 // Core 2D modules (existing)
@@ -52,6 +53,7 @@ pub mod audio;
 pub mod camera;
 pub mod capture;
 pub mod colors;
+pub mod crash;
 pub mod debug;
 pub mod events;
 pub mod fx;
@@ -64,6 +66,7 @@ pub mod rng;
 pub mod score;
 pub mod series;
 pub mod settings;
+pub mod source_gate;
 pub mod sprite;
 pub mod states;
 pub mod strip;
