@@ -212,6 +212,38 @@ pub fn delete_slot(game_name: &str, slot_name: &str) -> Result<(), String> {
     }
 }
 
+/// Set a slot's raw contents aside under a quarantine name.
+///
+/// A save that will not parse is one auto-save away from being overwritten
+/// by the fresh state that replaced it — the corruption destroys the
+/// player's record only because the next write finishes the job. Moving
+/// the bytes to `{slot}_corrupt` preserves them for inspection or repair
+/// while freeing the real slot. Returns the quarantine slot name; errs when
+/// there is nothing to quarantine or the move fails.
+pub fn quarantine_slot(game_name: &str, slot_name: &str) -> Result<String, String> {
+    let quarantine_name = format!("{}_corrupt", slot_name);
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let content = storage_read(game_name, slot_name)
+            .ok_or_else(|| format!("No save found for slot: {}", slot_name))?;
+        crate::wasm_storage::storage_set(&storage_key(game_name, &quarantine_name), &content);
+        crate::wasm_storage::storage_remove(&storage_key(game_name, slot_name));
+        crate::wasm_storage::storage_remove(&legacy_storage_key(slot_name));
+        Ok(quarantine_name)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let path = get_app_data_path(game_name, &format!("save_{}.json", slot_name))
+            .ok_or_else(|| "Could not determine save path".to_string())?;
+        let quarantined = get_app_data_path(game_name, &format!("save_{}.json", quarantine_name))
+            .ok_or_else(|| "Could not determine save path".to_string())?;
+        fs::rename(&path, &quarantined).map_err(|e| format!("Failed to quarantine: {}", e))?;
+        Ok(quarantine_name)
+    }
+}
+
 /// Peek the version recorded in a save slot.
 pub fn peek_slot_version(game_name: &str, slot_name: &str) -> Result<Option<String>, String> {
     #[cfg(not(target_arch = "wasm32"))]
@@ -370,5 +402,42 @@ mod storage_key_tests {
         let key = storage_key("../other", "autosave");
         assert!(!key.contains('/'), "{}", key);
         assert!(!key.contains('\\'), "{}", key);
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod quarantine_tests {
+    use super::*;
+
+    /// Quarantining a slot that will not parse must preserve its exact
+    /// bytes under the quarantine name and free the original — the point is
+    /// that the next auto-save cannot destroy the player's record.
+    #[test]
+    fn a_corrupt_slot_is_preserved_not_destroyed() {
+        const GAME: &str = "toolkit_quarantine_test";
+        let garbage = "{ this is not json";
+        let path = get_app_data_path(GAME, "save_autosave.json").expect("a save path");
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).expect("app data dir");
+        }
+        std::fs::write(&path, garbage).expect("plant the corrupt save");
+
+        let quarantine_name = quarantine_slot(GAME, "autosave").expect("quarantine succeeds");
+
+        assert!(!path.exists(), "the corrupt file must vacate the real slot");
+        let quarantined =
+            get_app_data_path(GAME, &format!("save_{}.json", quarantine_name)).expect("a path");
+        let preserved = std::fs::read_to_string(&quarantined).expect("the bytes survive");
+        assert_eq!(preserved, garbage, "quarantine must not alter the bytes");
+
+        // Nothing left behind for the next run.
+        let _ = std::fs::remove_file(&quarantined);
+        let _ = std::fs::remove_dir(path.parent().expect("a parent"));
+    }
+
+    /// Quarantining nothing is an error, not an invented file.
+    #[test]
+    fn an_absent_slot_cannot_be_quarantined() {
+        assert!(quarantine_slot("toolkit_quarantine_absent", "autosave").is_err());
     }
 }

@@ -61,7 +61,7 @@ pub use keys::{
 pub use save_root::SaveRoot;
 pub use slots::{
     delete_slot, get_save_slots, load_from_slot, load_from_slot_with_migration, peek_slot_version,
-    save_to_slot, save_to_slot_with_version, slot_exists, SaveSlot,
+    quarantine_slot, save_to_slot, save_to_slot_with_version, slot_exists, SaveSlot,
 };
 pub use version::{
     load_json_key_with_migration, peek_json_key_version, peek_version_from_str, peek_version_value,
