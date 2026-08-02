@@ -58,7 +58,13 @@ try {
     New-Item -ItemType Directory -Force -Path $outDir | Out-Null
 
     foreach ($scene in $Scenes) {
-        $path = Join-Path $outDir ("ui_{0}.png" -f $scene)
+        # A scene name is a game's own addressing scheme, not a filename. Games
+        # that route by "area:rock_fields:0:day" hit an InvalidFilename panic on
+        # Windows the moment that name reaches Join-Path, and the script then
+        # reports "capture failed" for what is really an unwritable path. The
+        # file gets a sanitised name; the game still receives the scene verbatim.
+        $safe = [regex]::Replace($scene, '[^A-Za-z0-9._+-]', '_')
+        $path = Join-Path $outDir ("ui_{0}.png" -f $safe)
         if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
 
         Set-Item -Path "Env:${Prefix}_CAPTURE_PATH" -Value $path
