@@ -10,6 +10,10 @@
 # Or via a one-line per-game wrapper script. Override -Prefix / -ExeName only
 # if the game's env-var prefix doesn't match its package name.
 #
+# The game window stays off the desktop for the whole run: the toolkit hides it
+# as it is created, and the frames are read out of the back buffer, which does
+# not need the window to be on screen. Pass -Visible to watch instead.
+#
 # -Release builds and captures with the optimised binary. Default is debug,
 # which is fine for most games; reach for -Release when a scene is heavy enough
 # that an unoptimised build cannot render it in reasonable time. Toybox is the
@@ -26,6 +30,10 @@ param(
     [int]$MinBytes = 40000,
     [switch]$SkipBuild,
     [switch]$Release,
+    # Captures run with the game window hidden (macroquad_toolkit::capture::headless).
+    # -Visible puts it back on the desktop, for when a capture comes out wrong
+    # and you want to watch the scene play out.
+    [switch]$Visible,
     [int]$TimeoutSeconds = 300
 )
 
@@ -70,6 +78,7 @@ try {
         Set-Item -Path "Env:${Prefix}_CAPTURE_PATH" -Value $path
         Set-Item -Path "Env:${Prefix}_CAPTURE_SCENE" -Value $scene
         Set-Item -Path "Env:${Prefix}_CAPTURE_FRAMES" -Value "$Frames"
+        Set-Item -Path "Env:${Prefix}_HEADLESS" -Value $(if ($Visible) { "0" } else { "1" })
         try {
             # Bounded wait. A game whose capture prefix does not match the one
             # it reads sees no PREFIX_CAPTURE_* vars at all, falls through to
@@ -85,7 +94,7 @@ try {
             }
         }
         finally {
-            Remove-Item "Env:${Prefix}_CAPTURE_PATH", "Env:${Prefix}_CAPTURE_SCENE", "Env:${Prefix}_CAPTURE_FRAMES" -ErrorAction SilentlyContinue
+            Remove-Item "Env:${Prefix}_CAPTURE_PATH", "Env:${Prefix}_CAPTURE_SCENE", "Env:${Prefix}_CAPTURE_FRAMES", "Env:${Prefix}_HEADLESS" -ErrorAction SilentlyContinue
         }
 
         if (-not (Test-Path -LiteralPath $path)) { throw "Capture failed: $path not created." }

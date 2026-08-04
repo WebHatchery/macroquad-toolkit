@@ -74,6 +74,8 @@ pub async fn run_filmstrip<F>(config: &super::CaptureConfig, strip: &StripConfig
 where
     F: FnMut(f32),
 {
+    super::headless::arm(&config.prefix);
+
     let mut tiles: Vec<Image> = Vec::new();
     for rendered in 0..config.frames {
         frame(config.timestep);

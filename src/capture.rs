@@ -11,6 +11,8 @@
 //! - `PREFIX_CAPTURE_SCENE` — scene name passed to your seeding code (default "gameplay")
 //! - `PREFIX_CAPTURE_FRAMES` — frames to simulate before capturing (default 150)
 //! - `PREFIX_WINDOW_WIDTH` / `PREFIX_WINDOW_HEIGHT` — window size override
+//! - `PREFIX_HEADLESS` — hide the game window; on by default while capturing,
+//!   set to `0` to watch the run (see [`headless`])
 //!
 //! Integration (see `docs/screenshot_capture_harness_guide.md` for the full
 //! walkthrough and gotchas):
@@ -41,12 +43,16 @@
 //! All env access is stubbed out on `wasm32`, so web builds are unaffected.
 
 pub mod filmstrip;
+pub mod headless;
 
 use macroquad::prelude::*;
 
 /// Capture parameters read from `PREFIX_CAPTURE_*` env vars.
 #[derive(Debug, Clone)]
 pub struct CaptureConfig {
+    /// The game's env-var prefix, kept so the harness can read the rest of the
+    /// `PREFIX_*` family (e.g. `PREFIX_HEADLESS`) without being told twice.
+    pub prefix: String,
     /// Output PNG path (`PREFIX_CAPTURE_PATH`).
     pub path: String,
     /// Scene name to seed before capturing (`PREFIX_CAPTURE_SCENE`, default "gameplay").
@@ -64,6 +70,7 @@ impl CaptureConfig {
     pub fn from_env(prefix: &str) -> Option<Self> {
         let path = env_string(&format!("{prefix}_CAPTURE_PATH"))?;
         Some(Self {
+            prefix: prefix.to_owned(),
             path,
             scene: env_string(&format!("{prefix}_CAPTURE_SCENE"))
                 .unwrap_or_else(|| "gameplay".to_owned()),
@@ -83,12 +90,17 @@ pub fn capture_requested(prefix: &str) -> bool {
 /// Reads `PREFIX_WINDOW_WIDTH/HEIGHT` overrides and disables `high_dpi` while
 /// capturing so the screenshot framebuffer is pixel-aligned with the logical
 /// UI layout (on scaled displays `high_dpi: true` captures at 2x size).
+///
+/// Also arms [`headless`] window hiding. `window_conf()` is the earliest hook a
+/// game has — arming here means the window is hidden as it appears rather than
+/// after the game has finished loading.
 pub fn capture_window_conf(
     prefix: &str,
     title: &str,
     default_width: i32,
     default_height: i32,
 ) -> Conf {
+    headless::arm(prefix);
     Conf {
         window_title: title.to_owned(),
         window_width: env_i32(&format!("{prefix}_WINDOW_WIDTH"), default_width),
@@ -105,6 +117,10 @@ pub fn capture_window_conf(
 /// Seed your scene (e.g. `game.begin_capture_scene(&config.scene)`) before
 /// calling this.
 pub async fn run_capture<F: FnMut(f32)>(config: &CaptureConfig, mut frame: F) {
+    // No-op when `window_conf` already armed it; the safety net for a game that
+    // builds its `Conf` by hand and never called `capture_window_conf`.
+    headless::arm(&config.prefix);
+
     let mut rendered = 0;
     loop {
         frame(config.timestep);

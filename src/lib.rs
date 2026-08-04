@@ -125,6 +125,7 @@ pub mod prelude {
     pub use crate::states::*;
 
     // Screenshot capture harness
+    pub use crate::capture::headless::{headless_requested, hide_window};
     pub use crate::capture::{capture_requested, capture_window_conf, run_capture, CaptureConfig};
 }
 
