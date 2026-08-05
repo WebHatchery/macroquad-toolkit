@@ -48,6 +48,8 @@ pub struct GameSettings {
     /// instead of a hardcoded/config interval so players can tune it; clamped
     /// to `[5, 600]` by [`sanitize`](Self::sanitize).
     pub autosave_interval: f32,
+    /// Preferred initial simulation speed for games that expose speed controls.
+    pub default_speed: i32,
 }
 
 impl Default for GameSettings {
@@ -61,6 +63,7 @@ impl Default for GameSettings {
             screen_shake: true,
             ui_text_scale: 1.0,
             autosave_interval: 30.0,
+            default_speed: 1,
         }
     }
 }
@@ -109,6 +112,7 @@ impl GameSettings {
         self.music_volume = self.music_volume.clamp(0.0, 1.0);
         self.ui_text_scale = self.ui_text_scale.clamp(0.25, 4.0);
         self.autosave_interval = self.autosave_interval.clamp(5.0, 600.0);
+        self.default_speed = self.default_speed.clamp(1, 4);
     }
 }
 
@@ -153,6 +157,9 @@ mod tests {
         };
         too_slow.sanitize();
         assert!((too_slow.autosave_interval - 600.0).abs() < 1e-6);
+        let mut bad_speed = GameSettings { default_speed: 9, ..Default::default() };
+        bad_speed.sanitize();
+        assert_eq!(bad_speed.default_speed, 4);
     }
 
     #[test]
