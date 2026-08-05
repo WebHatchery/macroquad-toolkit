@@ -34,6 +34,94 @@ pub struct Sprite {
     pub color: Color,
 }
 
+/// A named clip in a uniformly gridded sprite atlas.
+///
+/// Frame selection is deliberately pure: callers can use a simulation-stable
+/// phase offset without letting render timing influence game state.
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpriteClip {
+    pub name: String,
+    pub start_frame: usize,
+    pub frame_count: usize,
+    pub fps: f32,
+    pub looping: bool,
+}
+
+impl SpriteClip {
+    pub fn new(name: impl Into<String>, start_frame: usize, frame_count: usize, fps: f32) -> Self {
+        Self {
+            name: name.into(),
+            start_frame,
+            frame_count: frame_count.max(1),
+            fps: fps.max(0.0),
+            looping: true,
+        }
+    }
+
+    pub fn one_shot(mut self) -> Self {
+        self.looping = false;
+        self
+    }
+
+    /// Select the source-atlas frame at `elapsed_seconds`.
+    pub fn frame_at(&self, elapsed_seconds: f32) -> usize {
+        let elapsed = elapsed_seconds.max(0.0);
+        let local = (elapsed * self.fps).floor() as usize;
+        let offset = if self.looping {
+            local % self.frame_count
+        } else {
+            local.min(self.frame_count - 1)
+        };
+        self.start_frame + offset
+    }
+}
+
+/// A uniformly gridded texture atlas with named animation clips.
+#[derive(Debug, Clone)]
+pub struct SpriteAtlas {
+    pub texture: Texture2D,
+    pub frame_size: Vec2,
+    pub columns: usize,
+}
+
+impl SpriteAtlas {
+    pub fn new(texture: Texture2D, frame_width: f32, frame_height: f32) -> Self {
+        let frame_size = vec2(frame_width.max(1.0), frame_height.max(1.0));
+        let columns = (texture.width() / frame_size.x).floor().max(1.0) as usize;
+        Self {
+            texture,
+            frame_size,
+            columns,
+        }
+    }
+
+    pub fn source_rect(&self, frame: usize) -> Rect {
+        let column = frame % self.columns;
+        let row = frame / self.columns;
+        Rect::new(
+            column as f32 * self.frame_size.x,
+            row as f32 * self.frame_size.y,
+            self.frame_size.x,
+            self.frame_size.y,
+        )
+    }
+
+    pub fn draw_frame(&self, frame: usize, center: Vec2, size: Vec2, flip_x: bool, tint: Color) {
+        let width = if flip_x { -size.x } else { size.x };
+        draw_texture_ex(
+            &self.texture,
+            center.x - if flip_x { -size.x * 0.5 } else { size.x * 0.5 },
+            center.y - size.y * 0.5,
+            tint,
+            DrawTextureParams {
+                dest_size: Some(vec2(width, size.y)),
+                source: Some(self.source_rect(frame)),
+                ..Default::default()
+            },
+        );
+    }
+}
+
 impl Sprite {
     /// Create a new sprite with default values
     pub fn new() -> Self {
@@ -125,5 +213,25 @@ impl Sprite {
 impl Default for Sprite {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SpriteClip;
+
+    #[test]
+    fn looping_clip_wraps_at_its_last_frame() {
+        let clip = SpriteClip::new("walk", 4, 3, 10.0);
+        assert_eq!(clip.frame_at(0.0), 4);
+        assert_eq!(clip.frame_at(0.25), 6);
+        assert_eq!(clip.frame_at(0.3), 4);
+    }
+
+    #[test]
+    fn one_shot_clip_clamps_at_its_last_frame() {
+        let clip = SpriteClip::new("death", 8, 3, 10.0).one_shot();
+        assert_eq!(clip.frame_at(0.0), 8);
+        assert_eq!(clip.frame_at(9.0), 10);
     }
 }
