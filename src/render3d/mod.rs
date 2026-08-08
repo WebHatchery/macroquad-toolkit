@@ -7,6 +7,8 @@
 
 pub mod billboard;
 pub mod camera;
+pub mod picking;
 
 pub use billboard::*;
 pub use camera::*;
+pub use picking::*;
