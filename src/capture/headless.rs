@@ -14,7 +14,7 @@
 //! # Enabling
 //!
 //! `PREFIX_HEADLESS` controls it, defaulting to **on whenever capture mode is
-//! active** (`PREFIX_CAPTURE_PATH` set):
+//! active** (`PREFIX_CAPTURE_MANIFEST` set):
 //!
 //! - capture run — headless by default; set `PREFIX_HEADLESS=0` to watch it
 //! - bot / normal run — visible by default; set `PREFIX_HEADLESS=1` to hide it

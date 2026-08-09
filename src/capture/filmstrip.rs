@@ -2,7 +2,7 @@
 //!
 //! # What a screenshot cannot show
 //!
-//! [`run_capture`](super::run_capture) steps the simulation a fixed number of
+//! [`run_capture_once`](super::run_capture_once) steps the simulation a fixed number of
 //! frames and photographs the last one. That is the right tool for a panel, a
 //! menu, a laid-out screen — anything that has come to rest.
 //!
@@ -67,7 +67,7 @@ impl StripConfig {
 /// tiles as one image.
 ///
 /// `frame` is the game's update-and-draw, exactly as for
-/// [`run_capture`](super::run_capture) — and it runs on *every* frame, not just
+/// [`run_capture_once`](super::run_capture_once) — and it runs on *every* frame, not just
 /// the photographed ones, which is what a per-frame motion check needs. Put the
 /// check in there alongside the draw.
 pub async fn run_filmstrip<F>(config: &super::CaptureConfig, strip: &StripConfig, mut frame: F)

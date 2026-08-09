@@ -1,14 +1,13 @@
-//! Headless screenshot capture harness.
+//! Background screenshot capture harness.
 //!
-//! Lets a game screenshot *itself*: when a `PREFIX_CAPTURE_PATH` env var is
-//! set, the game boots into a chosen scene, steps the simulation a fixed
-//! number of frames at a fixed timestep, writes a PNG, and exits. This makes
+//! Lets a game screenshot *itself*: when a `PREFIX_CAPTURE_MANIFEST` env var is
+//! set, the game boots into the requested scenes, steps each simulation a
+//! fixed number of frames at a fixed timestep, and writes PNGs. This makes
 //! UI/rendering changes visually verifiable from a script (or by an AI agent
 //! that reads the PNG back) with no interactive input.
 //!
 //! Env vars (replace `PREFIX` with your game's prefix, e.g. `CARRIAGE`):
-//! - `PREFIX_CAPTURE_PATH` — output PNG path; presence enables capture mode
-//! - `PREFIX_CAPTURE_SCENE` — scene name passed to your seeding code (default "gameplay")
+//! - `PREFIX_CAPTURE_MANIFEST` — tab-separated scene/path rows for a batch
 //! - `PREFIX_CAPTURE_FRAMES` — frames to simulate before capturing (default 150)
 //! - `PREFIX_WINDOW_WIDTH` / `PREFIX_WINDOW_HEIGHT` — window size override
 //! - `PREFIX_HEADLESS` — hide the game window; on by default while capturing,
@@ -26,13 +25,15 @@
 //! async fn main() {
 //!     let mut game = Game::new().await;
 //!
-//!     if let Some(config) = capture::CaptureConfig::from_env("MYGAME") {
-//!         game.begin_capture_scene(&config.scene);
-//!         capture::run_capture(&config, |dt| {
-//!             game.update(dt);
-//!             game.draw();
-//!         })
-//!         .await;
+//!     if let Some(configs) = capture::CaptureConfig::all_from_env("MYGAME") {
+//!         for config in configs {
+//!             game.begin_capture_scene(&config.scene);
+//!             capture::run_capture_once(&config, |dt| {
+//!                 game.update(dt);
+//!                 game.draw();
+//!             })
+//!             .await;
+//!         }
 //!         return;
 //!     }
 //!
@@ -53,9 +54,9 @@ pub struct CaptureConfig {
     /// The game's env-var prefix, kept so the harness can read the rest of the
     /// `PREFIX_*` family (e.g. `PREFIX_HEADLESS`) without being told twice.
     pub prefix: String,
-    /// Output PNG path (`PREFIX_CAPTURE_PATH`).
+    /// Output PNG path from the manifest row.
     pub path: String,
-    /// Scene name to seed before capturing (`PREFIX_CAPTURE_SCENE`, default "gameplay").
+    /// Scene name to seed before capturing, from the manifest row.
     pub scene: String,
     /// Number of frames to simulate before writing the PNG (`PREFIX_CAPTURE_FRAMES`, default 150).
     pub frames: u32,
@@ -65,24 +66,53 @@ pub struct CaptureConfig {
 }
 
 impl CaptureConfig {
-    /// Returns `Some` when `PREFIX_CAPTURE_PATH` is set, i.e. the process was
-    /// launched in capture mode. Always `None` on wasm32.
-    pub fn from_env(prefix: &str) -> Option<Self> {
-        let path = env_string(&format!("{prefix}_CAPTURE_PATH"))?;
-        Some(Self {
-            prefix: prefix.to_owned(),
-            path,
-            scene: env_string(&format!("{prefix}_CAPTURE_SCENE"))
-                .unwrap_or_else(|| "gameplay".to_owned()),
-            frames: env_u32(&format!("{prefix}_CAPTURE_FRAMES"), 150).max(1),
-            timestep: 1.0 / 60.0,
-        })
+    /// Returns every requested capture from the batch manifest. One manifest is
+    /// consumed by one process/window. Always `None` on wasm32.
+    pub fn all_from_env(prefix: &str) -> Option<Vec<Self>> {
+        if let Some(manifest_path) = env_string(&format!("{prefix}_CAPTURE_MANIFEST")) {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let contents = std::fs::read_to_string(&manifest_path).unwrap_or_else(|error| {
+                    panic!("could not read capture manifest {manifest_path}: {error}")
+                });
+                let frames = env_u32(&format!("{prefix}_CAPTURE_FRAMES"), 150).max(1);
+                let configs = contents
+                    .trim_start_matches('\u{feff}')
+                    .lines()
+                    .filter(|line| !line.trim().is_empty())
+                    .map(|line| {
+                        let (scene, path) = line.split_once('\t').unwrap_or_else(|| {
+                            panic!("invalid capture manifest row (expected scene<TAB>path): {line}")
+                        });
+                        Self {
+                            prefix: prefix.to_owned(),
+                            path: path.to_owned(),
+                            scene: scene.to_owned(),
+                            frames,
+                            timestep: 1.0 / 60.0,
+                        }
+                    })
+                    .collect::<Vec<_>>();
+                if configs.is_empty() {
+                    panic!("capture manifest {manifest_path} contains no scenes");
+                }
+                return Some(configs);
+            }
+
+            #[cfg(target_arch = "wasm32")]
+            {
+                let _ = manifest_path;
+                return None;
+            }
+        }
+
+        None
     }
 }
 
-/// True when the process was launched in capture mode (`PREFIX_CAPTURE_PATH` set).
+/// True when the process was launched with a batch capture manifest.
 pub fn capture_requested(prefix: &str) -> bool {
-    env_string(&format!("{prefix}_CAPTURE_PATH")).is_some()
+    env_string(&format!("{prefix}_CAPTURE_MANIFEST")).is_some()
 }
 
 /// Capture-aware `Conf` for `#[macroquad::main(window_conf)]`.
@@ -111,12 +141,12 @@ pub fn capture_window_conf(
     }
 }
 
-/// Screenshot harness loop: call `frame(timestep)` (your update + draw) a fixed
-/// number of times, write the PNG, then exit the process.
+/// Screenshot harness loop for one scene: call `frame(timestep)` (your update +
+/// draw) a fixed number of times and write its PNG without exiting the process.
 ///
 /// Seed your scene (e.g. `game.begin_capture_scene(&config.scene)`) before
 /// calling this.
-pub async fn run_capture<F: FnMut(f32)>(config: &CaptureConfig, mut frame: F) {
+pub async fn run_capture_once<F: FnMut(f32)>(config: &CaptureConfig, mut frame: F) {
     // No-op when `window_conf` already armed it; the safety net for a game that
     // builds its `Conf` by hand and never called `capture_window_conf`.
     headless::arm(&config.prefix);
@@ -139,7 +169,6 @@ pub async fn run_capture<F: FnMut(f32)>(config: &CaptureConfig, mut frame: F) {
         "captured {} (scene: {}, {} frames)",
         config.path, config.scene, config.frames
     );
-    std::process::exit(0);
 }
 
 /// Read an env var as an `i32`, falling back on missing/unparsable values.

@@ -157,7 +157,10 @@ mod tests {
         };
         too_slow.sanitize();
         assert!((too_slow.autosave_interval - 600.0).abs() < 1e-6);
-        let mut bad_speed = GameSettings { default_speed: 9, ..Default::default() };
+        let mut bad_speed = GameSettings {
+            default_speed: 9,
+            ..Default::default()
+        };
         bad_speed.sanitize();
         assert_eq!(bad_speed.default_speed, 4);
     }
