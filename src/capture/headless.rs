@@ -58,6 +58,12 @@ pub fn arm(prefix: &str) {
             return;
         }
 
+        // Miniquad explicitly calls SW_SHOW while creating its GL window. A
+        // CBT hook on that same UI thread rejects the activation before Windows
+        // can move keyboard focus, while the watcher below keeps the window
+        // hidden after creation.
+        windows::prevent_activation();
+
         std::thread::spawn(|| {
             let start = std::time::Instant::now();
             loop {
@@ -104,9 +110,13 @@ mod windows {
     use std::ffi::c_void;
 
     type Hwnd = *mut c_void;
+    type Hhook = *mut c_void;
     type EnumProc = unsafe extern "system" fn(Hwnd, isize) -> i32;
+    type HookProc = unsafe extern "system" fn(i32, usize, isize) -> isize;
 
     const SW_HIDE: i32 = 0;
+    const WH_CBT: i32 = 5;
+    const HCBT_ACTIVATE: i32 = 5;
     /// The class miniquad registers for its game window. Checked so a stray
     /// top-level window of ours (a message box, a driver overlay) is left alone.
     const MINIQUAD_CLASS: &str = "MINIQUADAPP";
@@ -118,11 +128,30 @@ mod windows {
         fn GetClassNameW(hwnd: Hwnd, buffer: *mut u16, max_count: i32) -> i32;
         fn IsWindowVisible(hwnd: Hwnd) -> i32;
         fn ShowWindow(hwnd: Hwnd, command: i32) -> i32;
+        fn SetWindowsHookExW(
+            hook_id: i32,
+            callback: Option<HookProc>,
+            module: *mut c_void,
+            thread_id: u32,
+        ) -> Hhook;
+        fn CallNextHookEx(hook: Hhook, code: i32, wparam: usize, lparam: isize) -> isize;
     }
 
     #[link(name = "kernel32")]
     extern "system" {
         fn GetCurrentProcessId() -> u32;
+        fn GetCurrentThreadId() -> u32;
+    }
+
+    pub fn prevent_activation() {
+        unsafe {
+            SetWindowsHookExW(
+                WH_CBT,
+                Some(on_cbt_event),
+                std::ptr::null_mut(),
+                GetCurrentThreadId(),
+            );
+        }
     }
 
     pub fn hide() -> bool {
@@ -156,5 +185,22 @@ mod windows {
 
         *(lparam as *mut Hwnd) = hwnd;
         0
+    }
+
+    unsafe extern "system" fn on_cbt_event(code: i32, wparam: usize, lparam: isize) -> isize {
+        if code == HCBT_ACTIVATE {
+            let hwnd = wparam as Hwnd;
+            if is_miniquad_window(hwnd) {
+                ShowWindow(hwnd, SW_HIDE);
+                return 1;
+            }
+        }
+        CallNextHookEx(std::ptr::null_mut(), code, wparam, lparam)
+    }
+
+    unsafe fn is_miniquad_window(hwnd: Hwnd) -> bool {
+        let mut class = [0u16; 64];
+        let written = GetClassNameW(hwnd, class.as_mut_ptr(), class.len() as i32);
+        written > 0 && String::from_utf16_lossy(&class[..written as usize]) == MINIQUAD_CLASS
     }
 }
