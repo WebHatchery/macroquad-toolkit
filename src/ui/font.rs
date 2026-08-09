@@ -7,13 +7,28 @@
 use crate::colors::dark;
 use macroquad::prelude::*;
 use std::cell::RefCell;
+use std::collections::HashMap;
 
 const RAJDHANI_SEMIBOLD_BYTES: &[u8] = include_bytes!("../../assets/fonts/Rajdhani-SemiBold.ttf");
 
 thread_local! {
     static DEFAULT_UI_FONT: RefCell<Option<&'static Font>> = const { RefCell::new(None) };
+    static USE_MACROQUAD_DEFAULT_FONT: RefCell<bool> = const { RefCell::new(false) };
     static UI_TEXT_SCALE: RefCell<f32> = const { RefCell::new(1.0) };
     static MIN_UI_FONT_SIZE: RefCell<f32> = const { RefCell::new(1.0) };
+    static TEXT_LAYOUT_CACHE: RefCell<HashMap<TextLayoutCacheKey, TextLayoutResult>> = RefCell::new(HashMap::new());
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct TextLayoutCacheKey {
+    text: String,
+    max_width: u32,
+    max_height: u32,
+    starting_font_size: u32,
+    min_font_size: u32,
+    line_gap: u32,
+    text_scale: u32,
+    font: usize,
 }
 
 pub(crate) fn font_size_u16(font_size: f32) -> u16 {
@@ -45,6 +60,19 @@ pub fn set_default_ui_font(font: Font) {
     DEFAULT_UI_FONT.with(|stored| {
         *stored.borrow_mut() = Some(font);
     });
+    USE_MACROQUAD_DEFAULT_FONT.with(|enabled| *enabled.borrow_mut() = false);
+}
+
+/// Use Macroquad's built-in font for every toolkit text helper without lazy-loading Rajdhani.
+///
+/// This is useful for text-heavy applications that prefer Macroquad's stable shared atlas over
+/// the bundled display face. Calling [`set_default_ui_font`] later selects that explicit font.
+pub fn use_macroquad_default_ui_font() {
+    USE_MACROQUAD_DEFAULT_FONT.with(|enabled| *enabled.borrow_mut() = true);
+}
+
+fn uses_macroquad_default_font() -> bool {
+    USE_MACROQUAD_DEFAULT_FONT.with(|enabled| *enabled.borrow())
 }
 
 /// Decode and register a default font from embedded TTF/OTF bytes.
@@ -81,7 +109,7 @@ fn registered_default_ui_font() -> Option<&'static Font> {
 /// Games can call this during startup. Toolkit text helpers also call it lazily so
 /// `TextStyle` users get the shared Rajdhani font without duplicating font assets.
 pub fn ensure_default_ui_font() -> Result<(), String> {
-    if registered_default_ui_font().is_none() {
+    if !uses_macroquad_default_font() && registered_default_ui_font().is_none() {
         set_builtin_rajdhani_semibold_ui_font()?;
     }
     Ok(())
@@ -89,6 +117,9 @@ pub fn ensure_default_ui_font() -> Result<(), String> {
 
 /// Return the registered default UI font, loading the bundled Rajdhani font if needed.
 pub fn default_ui_font() -> Option<&'static Font> {
+    if uses_macroquad_default_font() {
+        return None;
+    }
     let _ = ensure_default_ui_font();
     registered_default_ui_font()
 }
@@ -189,6 +220,7 @@ pub struct TextLayoutResult {
 #[derive(Debug, Clone, Copy)]
 pub struct TextStyle<'a> {
     pub font: Option<&'a Font>,
+    pub(crate) macroquad_default: bool,
     pub font_size: f32,
     pub color: Color,
     pub line_gap: f32,
@@ -198,6 +230,7 @@ impl<'a> TextStyle<'a> {
     pub fn new(font_size: f32, color: Color) -> Self {
         Self {
             font: None,
+            macroquad_default: false,
             font_size,
             color,
             line_gap: 4.0,
@@ -206,6 +239,14 @@ impl<'a> TextStyle<'a> {
 
     pub fn with_font(mut self, font: &'a Font) -> Self {
         self.font = Some(font);
+        self.macroquad_default = false;
+        self
+    }
+
+    /// Draw with Macroquad's built-in font instead of the registered toolkit font.
+    pub fn with_macroquad_font(mut self) -> Self {
+        self.font = None;
+        self.macroquad_default = true;
         self
     }
 
@@ -215,7 +256,11 @@ impl<'a> TextStyle<'a> {
     }
 
     pub fn resolved_font(&self) -> Option<&'a Font> {
-        self.font.or(default_ui_font())
+        if self.macroquad_default {
+            None
+        } else {
+            self.font.or(default_ui_font())
+        }
     }
 
     pub fn effective_font_size(&self) -> f32 {
@@ -384,6 +429,21 @@ pub fn fit_text_to_box_ex(
     style: TextStyle<'_>,
     min_font_size: f32,
 ) -> TextLayoutResult {
+    let key = TextLayoutCacheKey {
+        text: text.to_owned(),
+        max_width: max_width.to_bits(),
+        max_height: max_height.to_bits(),
+        starting_font_size: style.font_size.to_bits(),
+        min_font_size: min_font_size.to_bits(),
+        line_gap: style.line_gap.to_bits(),
+        text_scale: ui_text_scale().to_bits(),
+        font: style
+            .resolved_font()
+            .map_or(0, |font| font as *const Font as usize),
+    };
+    if let Some(layout) = TEXT_LAYOUT_CACHE.with(|cache| cache.borrow().get(&key).cloned()) {
+        return layout;
+    }
     let mut font_size = style.font_size;
     let line_gap = style.effective_line_gap();
 
@@ -393,11 +453,14 @@ pub fn fit_text_to_box_ex(
         let total_height =
             lines.len() as f32 * draw_font_size + (lines.len().saturating_sub(1) as f32 * line_gap);
         if total_height <= max_height {
-            return TextLayoutResult {
-                lines,
-                font_size,
-                truncated: false,
-            };
+            return cache_text_layout(
+                key,
+                TextLayoutResult {
+                    lines,
+                    font_size,
+                    truncated: false,
+                },
+            );
         }
         font_size -= 1.0;
     }
@@ -414,11 +477,25 @@ pub fn fit_text_to_box_ex(
         *last_line = truncate_text_to_width_ex(last_line, max_width, style.font, font_size);
     }
 
-    TextLayoutResult {
-        lines,
-        font_size,
-        truncated,
-    }
+    cache_text_layout(
+        key,
+        TextLayoutResult {
+            lines,
+            font_size,
+            truncated,
+        },
+    )
+}
+
+fn cache_text_layout(key: TextLayoutCacheKey, layout: TextLayoutResult) -> TextLayoutResult {
+    TEXT_LAYOUT_CACHE.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if cache.len() >= 1_024 {
+            cache.clear();
+        }
+        cache.insert(key, layout.clone());
+    });
+    layout
 }
 
 #[allow(clippy::too_many_arguments)]

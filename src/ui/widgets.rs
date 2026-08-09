@@ -562,12 +562,8 @@ pub fn draw_tooltip_styled(
     draw_rectangle_lines(rect.x, rect.y, rect.w, rect.h, 1.0, style.border);
 
     let mut y = rect.y + style.padding + font_size;
-    let text_style = TextStyle {
-        font,
-        font_size: style.font_size,
-        color: style.text,
-        line_gap: style.line_gap,
-    };
+    let text_style = TextStyle::new(style.font_size, style.text).with_line_gap(style.line_gap);
+    let text_style = font.map_or(text_style, |font| text_style.with_font(font));
     for line in &lines {
         draw_text_ex(line, rect.x + style.padding, y, text_style.params());
         y += font_size + line_gap;
