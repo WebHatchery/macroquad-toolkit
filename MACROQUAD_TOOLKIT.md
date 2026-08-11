@@ -7,6 +7,7 @@ A collection of common utilities for Macroquad game development, extracted from 
 - **Input utilities**: Mouse hovering, clicking, rectangle collision detection
 - **UI rendering**: Buttons (with press/release variants), panels, progress bars
 - **Asset management**: Texture loading and caching
+- **JSON game data**: Typed embedded/runtime loading, labeled diagnostics, native/WASM handling, and fallback paths
 - **Camera2D**: Pan and zoom for 2D games
 - **Event bus**: Generic event system for decoupled game logic
 - **Color palettes**: Consistent dark theme colors
@@ -62,6 +63,25 @@ async fn main() {
 ```
 
 ## Modules
+
+### JSON game data (`data_loader` module)
+
+Keep schemas and semantic validation in the game, but route all generic JSON parsing and loading through the toolkit:
+
+```rust
+#[derive(serde::Deserialize)]
+struct GameConfig {
+    starting_gold: u32,
+}
+
+let embedded: GameConfig =
+    macroquad_toolkit::include_json!("../assets/data/game_config.json")?;
+
+let runtime: GameConfig =
+    macroquad_toolkit::data_loader::load_json_file("assets/data/game_config.json").await?;
+```
+
+Use `parse_json_labeled` when JSON already arrived as a string. Do not create project-local generic wrappers around `serde_json`; the toolkit provides consistent source names, line/column diagnostics, native/WASM loading, and embedded fallback support.
 
 ### Input (`input` module)
 
@@ -503,10 +523,11 @@ let texture = Texture2D::from_image(&image);
 
 ### Capture (`capture` module)
 
-Background screenshot harness: when a `PREFIX_CAPTURE_MANIFEST` env var is set,
-the game boots every requested scene inside one process/window, simulates a
-fixed number of frames at a fixed timestep, and writes each PNG. Full
-walkthrough and gotchas: `docs/screenshot_capture_harness_guide.md`.
+Headless screenshot harness: when a `PREFIX_CAPTURE_PATH` env var is set, the
+game boots into a chosen scene, simulates a fixed number of frames at a fixed
+timestep, writes a PNG, and exits. This makes UI changes visually verifiable
+from a script (or by an AI agent reading the PNG back) with no interactive
+input. Full walkthrough and gotchas: `docs/screenshot_capture_harness_guide.md`.
 
 ```rust
 use macroquad_toolkit::capture;
@@ -521,15 +542,13 @@ fn window_conf() -> Conf {
 async fn main() {
     let mut game = Game::new().await;
 
-    if let Some(configs) = capture::CaptureConfig::all_from_env("MYGAME") {
-        for config in configs {
-            game.begin_capture_scene(&config.scene); // your scene-seeding method
-            capture::run_capture_once(&config, |dt| {
-                game.update(dt);
-                game.draw();
-            })
-            .await;
-        }
+    if let Some(config) = capture::CaptureConfig::from_env("MYGAME") {
+        game.begin_capture_scene(&config.scene); // your scene-seeding method
+        capture::run_capture(&config, |dt| {
+            game.update(dt);
+            game.draw();
+        })
+        .await;
         return;
     }
 
@@ -543,14 +562,47 @@ capture starts in the state you want to photograph.
 
 Env vars (replace `MYGAME` with your per-game prefix):
 
-- `MYGAME_CAPTURE_MANIFEST` — tab-separated scene/output-path rows; presence enables capture mode
+- `MYGAME_CAPTURE_PATH` — output PNG path; presence enables capture mode
+- `MYGAME_CAPTURE_SCENE` — scene name (default `gameplay`)
 - `MYGAME_CAPTURE_FRAMES` — frames to simulate before capture (default 150)
 - `MYGAME_WINDOW_WIDTH` / `MYGAME_WINDOW_HEIGHT` — window size override
+- `MYGAME_HEADLESS` — hide the game window (default: on while capturing)
 
 All env access is stubbed out on `wasm32`, so web builds are unaffected.
 
+#### Really headless (`capture::headless`)
+
+macroquad has no offscreen mode — miniquad must create a real OS window to own
+the GL context and shows it as soon as that context exists — so a capture used
+to pop a full game window onto the desktop and take focus. `capture::headless`
+takes that window straight back off the desktop (`ShowWindow(SW_HIDE)` on
+Windows; a no-op elsewhere). Rendering is unaffected: the frame still lands in
+the back buffer, which the driver owns whether or not the window is mapped, and
+`get_screen_data()` reads the back buffer *before* the swap.
+
+`capture_window_conf` calls `headless::arm(prefix)` for you, so a game wired the
+standard way needs no change. `window_conf()` is the earliest hook a game has,
+and `arm` leaves a watcher behind that hides the window the moment miniquad
+shows it — so there is no visible flash while the game loads. A game that
+builds its `Conf` by hand should call `headless::arm("MYGAME")` there itself:
+
+```rust
+fn window_conf() -> Conf {
+    capture::headless::arm("MYGAME");
+    Conf { /* hand-built */ }
+}
+```
+
+`MYGAME_HEADLESS` defaults to whether capture mode is active, and overrides it
+either way:
+
+- `MYGAME_HEADLESS=0` during a capture — show the window, to watch a scene that
+  is coming out wrong (`capture_ui.ps1 -Visible` sets this)
+- `MYGAME_HEADLESS=1` outside capture mode — hide the window for any other
+  automated run, e.g. a playtest bot driving itself through a headless session
+
 A shared wrapper script (`macroquad-toolkit/scripts/capture_ui.ps1`) builds the
-game once for the complete scene batch and sanity-checks each PNG. It derives the
+game, runs one capture per scene, and sanity-checks each PNG. It derives the
 package name, exe path, and env prefix from `cargo metadata`, so from a game
 directory it needs no arguments:
 
@@ -562,6 +614,38 @@ directory it needs no arguments:
 Pass `-Prefix` if the game's env-var prefix differs from its package name
 (e.g. `carriage_run` uses `CARRIAGE`). See `carriage_run` for a reference
 integration, including a thin per-game `scripts/capture_ui.ps1` wrapper.
+
+### Source gate (`source_gate` module)
+
+The 800-line hard limit from `CODE_STANDARDS.md` §2.2 as a test, so plain
+`cargo test` enforces it locally and in CI. It counts non-test lines only:
+inline `#[cfg(test)] mod tests` blocks don't count, and extracted test files
+(`foo/tests.rs`, anything under a `tests/` directory inside `src/`) are exempt.
+Blank lines and comments in non-test code do count.
+
+Every game carries the same one-test integration file:
+
+```rust
+// tests/code_standards.rs
+#[test]
+fn source_files_stay_under_the_limit() {
+    macroquad_toolkit::source_gate::assert_source_files_within_limit(
+        env!("CARGO_MANIFEST_DIR"),
+        &[],
+    );
+}
+```
+
+Files already over the limit when the gate arrives are grandfathered by
+listing their manifest-relative paths (forward slashes) in the second
+argument. Grandfathered entries are ratcheted: when a listed file drops back
+under the limit, the gate fails until the entry is removed, so the list only
+shrinks. The gate also panics — rather than passing clean — if the path it is
+given has no `src/`.
+
+Sibling crates in the same repo can be gated from the one test file by
+passing their directories too, e.g.
+`assert_source_files_within_limit(concat!(env!("CARGO_MANIFEST_DIR"), "/kaiju_server"), &[])`.
 
 ## Button Click Semantics
 

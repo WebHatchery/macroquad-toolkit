@@ -42,7 +42,7 @@
 //! ## Other
 //! - [`audio`] - Audio playback utilities
 //! - [`events`] - Event handling utilities
-//! - [`capture`] - Headless screenshot capture harness (env-var driven)
+//! - [`capture`] - Single-window background screenshot capture harness
 //! - [`source_gate`] - 800-line source-file gate (CODE_STANDARDS §2.2) run under `cargo test`
 //! - [`db`] - Database support (optional, requires `db` feature)
 

@@ -10,6 +10,13 @@ extern "C" {
     fn storage_exists_extern(key: JsObject) -> bool;
 }
 
+/// Version handshake for the named miniquad storage browser plugin.
+#[cfg(target_family = "wasm")]
+#[no_mangle]
+pub extern "C" fn storage_crate_version() -> u32 {
+    1
+}
+
 pub fn storage_set(key: &str, value: &str) {
     let js_key = JsObject::string(key);
     let js_value = JsObject::string(value);

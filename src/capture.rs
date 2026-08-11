@@ -169,6 +169,10 @@ pub async fn run_capture_once<F: FnMut(f32)>(config: &CaptureConfig, mut frame: 
         "captured {} (scene: {}, {} frames)",
         config.path, config.scene, config.frames
     );
+    // Finish the photographed frame before the next scene starts drawing.
+    // Without this boundary, Macroquad's text batch can retain the previous
+    // scene's texture state and later glyphs render as black silhouettes.
+    next_frame().await;
 }
 
 /// Read an env var as an `i32`, falling back on missing/unparsable values.

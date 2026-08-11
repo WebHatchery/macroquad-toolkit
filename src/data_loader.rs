@@ -1,7 +1,7 @@
 //! Data loading utilities for JSON-based game data
 //!
 //! Provides patterns and helpers for loading game data from JSON files,
-//! either at compile-time using `include_str!()` or at runtime.
+//! either at compile time using toolkit macros or at runtime.
 //!
 //! # Compile-Time Data Loading
 //!
@@ -18,7 +18,7 @@
 //! }
 //!
 //! // In your code:
-//! const ITEMS_JSON: &str = include_str!("../assets/data/items.json");
+//! const ITEMS_JSON: &str = macroquad_toolkit::include_json_str!("../assets/data/items.json");
 //! let items: Vec<ItemData> = load_embedded_json(ITEMS_JSON).expect("Failed to parse items");
 //! ```
 //!
@@ -36,17 +36,59 @@ use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+/// Deserialize JSON supplied by a game-data source.
+///
+/// Project code should use this instead of calling `serde_json::from_str`
+/// directly so source labels and diagnostics stay consistent across games.
+pub fn parse_json<T: DeserializeOwned>(json: &str) -> Result<T, String> {
+    parse_json_labeled("embedded JSON", json)
+}
+
+/// Deserialize JSON with a source label included in any error.
+pub fn parse_json_labeled<T: DeserializeOwned>(label: &str, json: &str) -> Result<T, String> {
+    serde_json::from_str(json).map_err(|error| {
+        format!(
+            "JSON data error in '{label}' at line {}, column {}: {error}",
+            error.line(),
+            error.column()
+        )
+    })
+}
+
+/// Embed a JSON asset as text through the shared toolkit boundary.
+///
+/// Keeping the built-in `include_str!` behind this macro gives every game one
+/// recognizable JSON-loading path while preserving compile-time embedding and
+/// invocation-site-relative paths.
+#[macro_export]
+macro_rules! include_json_str {
+    ($($path:tt)+) => {
+        include_str!($($path)+)
+    };
+}
+
+/// Embed and deserialize a JSON asset through the toolkit's labeled parser.
+///
+/// The path is resolved by `include_str!` at the invocation site, just as it
+/// would be in project code, while parsing and diagnostics remain centralized.
+#[macro_export]
+macro_rules! include_json {
+    ($path:literal) => {
+        $crate::data_loader::parse_json_labeled($path, $crate::include_json_str!($path))
+    };
+}
+
 /// Load JSON data from an embedded string (compile-time include)
 ///
-/// Use this with `include_str!()` for data that should be compiled into the binary.
+/// Use this with `include_json_str!()` for data compiled into the binary.
 ///
 /// # Example
 /// ```rust,ignore
-/// const DATA: &str = include_str!("../data/items.json");
+/// const DATA: &str = macroquad_toolkit::include_json_str!("../data/items.json");
 /// let items: Vec<Item> = load_embedded_json(DATA)?;
 /// ```
 pub fn load_embedded_json<T: DeserializeOwned>(json_str: &str) -> Result<T, String> {
-    serde_json::from_str(json_str).map_err(|e| format!("JSON parse error: {}", e))
+    parse_json(json_str)
 }
 
 /// Load JSON data from an embedded string with a human-readable label in errors.
@@ -54,7 +96,7 @@ pub fn load_embedded_json_labeled<T: DeserializeOwned>(
     label: &str,
     json_str: &str,
 ) -> Result<T, String> {
-    serde_json::from_str(json_str).map_err(|e| format!("JSON parse error in '{}': {}", label, e))
+    parse_json_labeled(label, json_str)
 }
 
 /// Load several embedded JSON strings that all deserialize to the same type.
@@ -74,7 +116,7 @@ pub fn load_many_embedded_json<T: DeserializeOwned>(
 /// # Example
 /// ```rust,ignore
 /// // items.json: [{"id": "sword", "damage": 10}, {"id": "shield", "defense": 5}]
-/// const DATA: &str = include_str!("../data/items.json");
+/// const DATA: &str = macroquad_toolkit::include_json_str!("../data/items.json");
 /// let items: HashMap<String, Item> = load_embedded_json_map(DATA, "id")?;
 /// ```
 pub fn load_embedded_json_map<T: DeserializeOwned + Clone>(
@@ -108,8 +150,9 @@ pub fn load_embedded_json_map<T: DeserializeOwned + Clone>(
 /// Load JSON file at runtime (async, for macroquad)
 #[cfg(not(target_arch = "wasm32"))]
 pub async fn load_json_file<T: DeserializeOwned>(path: &str) -> Result<T, String> {
-    let content = std::fs::read_to_string(path).map_err(|e| format!("File read error: {}", e))?;
-    serde_json::from_str(&content).map_err(|e| format!("JSON parse error: {}", e))
+    let content = std::fs::read_to_string(path)
+        .map_err(|error| format!("JSON data file read error in '{path}': {error}"))?;
+    parse_json_labeled(path, &content)
 }
 
 /// Load JSON file at runtime (async, for WASM)
@@ -118,7 +161,7 @@ pub async fn load_json_file<T: DeserializeOwned>(path: &str) -> Result<T, String
     let content = macroquad::file::load_string(path)
         .await
         .map_err(|e| format!("File load error: {:?}", e))?;
-    serde_json::from_str(&content).map_err(|e| format!("JSON parse error: {}", e))
+    parse_json_labeled(path, &content)
 }
 
 /// Load a data file from "assets/data/{name}.json"
@@ -137,8 +180,9 @@ pub async fn load_data<T: DeserializeOwned>(name: &str) -> Result<T, String> {
 /// Synchronous JSON file loading (native only)
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load_json_file_sync<T: DeserializeOwned>(path: &str) -> Result<T, String> {
-    let content = std::fs::read_to_string(path).map_err(|e| format!("File read error: {}", e))?;
-    serde_json::from_str(&content).map_err(|e| format!("JSON parse error: {}", e))
+    let content = std::fs::read_to_string(path)
+        .map_err(|error| format!("JSON data file read error in '{path}': {error}"))?;
+    parse_json_labeled(path, &content)
 }
 
 /// Build a path relative to a crate manifest directory.
@@ -166,8 +210,7 @@ pub fn load_json_with_fallback_sync<T: DeserializeOwned>(
         if path.exists() {
             let content = std::fs::read_to_string(path)
                 .map_err(|e| format!("File read error in '{}': {}", path.display(), e))?;
-            return serde_json::from_str(&content)
-                .map_err(|e| format!("JSON parse error in '{}': {}", path.display(), e));
+            return parse_json_labeled(&path.display().to_string(), &content);
         }
     }
 
@@ -302,54 +345,4 @@ impl<T: Clone + DeserializeOwned> DataRegistry<T> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use serde::Deserialize;
-
-    #[derive(Debug, Clone, Deserialize, PartialEq)]
-    struct TestItem {
-        id: String,
-        name: String,
-        value: i32,
-    }
-
-    #[test]
-    fn test_load_embedded_json() {
-        let json = r#"[
-            {"id": "sword", "name": "Iron Sword", "value": 100},
-            {"id": "shield", "name": "Wooden Shield", "value": 50}
-        ]"#;
-
-        let items: Vec<TestItem> = load_embedded_json(json).unwrap();
-        assert_eq!(items.len(), 2);
-        assert_eq!(items[0].id, "sword");
-    }
-
-    #[test]
-    fn test_load_embedded_json_map() {
-        let json = r#"[
-            {"id": "sword", "name": "Iron Sword", "value": 100},
-            {"id": "shield", "name": "Wooden Shield", "value": 50}
-        ]"#;
-
-        let items: HashMap<String, TestItem> = load_embedded_json_map(json, "id").unwrap();
-        assert_eq!(items.len(), 2);
-        assert_eq!(items.get("sword").unwrap().value, 100);
-        assert_eq!(items.get("shield").unwrap().name, "Wooden Shield");
-    }
-
-    #[test]
-    fn test_data_registry() {
-        let json = r#"[
-            {"id": "sword", "name": "Iron Sword", "value": 100},
-            {"id": "shield", "name": "Wooden Shield", "value": 50}
-        ]"#;
-
-        let registry: DataRegistry<TestItem> =
-            DataRegistry::from_embedded_json(json, "id").unwrap();
-
-        assert_eq!(registry.len(), 2);
-        assert!(registry.contains("sword"));
-        assert_eq!(registry.get("sword").unwrap().name, "Iron Sword");
-    }
-}
+mod tests;

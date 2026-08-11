@@ -6,53 +6,30 @@ fn repeated(line: &str, n: usize) -> String {
 
 #[test]
 fn counts_every_line_including_blank_ones() {
-    assert_eq!(non_test_lines("let a = 1;\n\n// comment\n"), 3);
+    assert_eq!(source_lines("let a = 1;\n\n// comment\n"), 3);
 }
 
 #[test]
-fn inline_test_module_ends_the_count() {
+fn inline_test_module_lines_count_toward_the_limit() {
     let source = format!(
         "{}\n#[cfg(test)]\nmod tests {{\n{}\n}}\n",
         repeated("fn code() {}", 10),
         repeated("    // test line", 900)
     );
-    assert_eq!(non_test_lines(&source), 10);
+    assert_eq!(source_lines(&source), 913);
 }
 
 #[test]
-fn test_module_declaration_skips_only_itself() {
+fn test_module_declaration_lines_count_toward_the_limit() {
     let source = format!(
         "#[cfg(test)]\nmod tests;\n{}\n",
         repeated("fn code() {}", 10)
     );
-    assert_eq!(non_test_lines(&source), 10);
+    assert_eq!(source_lines(&source), 12);
 }
 
 #[test]
-fn cfg_test_on_a_non_module_item_counts_normally() {
-    let source = "#[cfg(test)]\nfn helper() {}\nfn code() {}\n";
-    assert_eq!(non_test_lines(source), 3);
-}
-
-#[test]
-fn attribute_and_module_on_one_line_end_the_count() {
-    let source = format!(
-        "fn code() {{}}\n#[cfg(test)] mod tests {{\n{}\n}}\n",
-        repeated("x", 50)
-    );
-    assert_eq!(non_test_lines(&source), 1);
-}
-
-#[test]
-fn extracted_test_files_are_exempt() {
-    assert!(is_test_file(Path::new("foo/tests.rs")));
-    assert!(is_test_file(Path::new("state/tests/ledger.rs")));
-    assert!(!is_test_file(Path::new("state/ledger.rs")));
-    assert!(!is_test_file(Path::new("contests.rs")));
-}
-
-#[test]
-fn oversized_files_reports_offenders_worst_first_and_skips_test_files() {
+fn oversized_files_reports_offenders_worst_first_including_test_files() {
     let root = std::env::temp_dir().join(format!("source_gate_test_{}", std::process::id()));
     let src = root.join("src").join("state");
     fs::create_dir_all(src.join("tests")).unwrap();
@@ -68,6 +45,10 @@ fn oversized_files_reports_offenders_worst_first_and_skips_test_files() {
         over,
         vec![
             Oversized {
+                path: "src/state/tests/huge.rs".into(),
+                lines: 500
+            },
+            Oversized {
                 path: "src/state/bigger.rs".into(),
                 lines: 40
             },
@@ -80,7 +61,7 @@ fn oversized_files_reports_offenders_worst_first_and_skips_test_files() {
 }
 
 #[test]
-#[should_panic(expected = "no src/")]
+#[should_panic(expected = "no project directory")]
 fn a_wrong_path_fails_instead_of_passing_clean() {
     oversized_files(std::env::temp_dir().join("source_gate_missing"), HARD_LIMIT);
 }

@@ -23,4 +23,5 @@ async-std = { version = "1.12", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 sapp-jsutils = "0.1"
+gamepads = { version = "0.1.7", default-features = false }
 

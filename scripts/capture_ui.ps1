@@ -89,8 +89,15 @@ try {
     if ($WindowWidth -gt 0) { Set-Item -Path "Env:${Prefix}_WINDOW_WIDTH" -Value "$WindowWidth" }
     if ($WindowHeight -gt 0) { Set-Item -Path "Env:${Prefix}_WINDOW_HEIGHT" -Value "$WindowHeight" }
     Set-Item -Path "Env:${Prefix}_HEADLESS" -Value $(if ($Visible) { "0" } else { "1" })
+    $stdoutPath = Join-Path $outDir (".capture_stdout_{0}.log" -f $PID)
+    $stderrPath = Join-Path $outDir (".capture_stderr_{0}.log" -f $PID)
     try {
-        $startArgs = @{ FilePath = $exe; PassThru = $true }
+        $startArgs = @{
+            FilePath = $exe
+            PassThru = $true
+            RedirectStandardOutput = $stdoutPath
+            RedirectStandardError = $stderrPath
+        }
         if (-not $Visible) { $startArgs.WindowStyle = "Hidden" }
         $proc = Start-Process @startArgs
         Write-Host ("Capturing {0} scenes in one process (PID {1})..." -f $captures.Count, $proc.Id)
@@ -101,11 +108,20 @@ try {
                 "'$Prefix', derived from the package name. Check what the " +
                 "game passes to CaptureConfig::all_from_env and pass -Prefix to match.")
         }
-        if ($proc.ExitCode -ne 0) { throw "Capture process exited with code $($proc.ExitCode)." }
+        if ($proc.ExitCode -ne 0) {
+            $details = @(
+                if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Tail 40 }
+                if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath -Tail 40 }
+            ) -join "`n"
+            throw "Capture process exited with code $($proc.ExitCode).`n$details"
+        }
     }
     finally {
         Remove-Item "Env:${Prefix}_CAPTURE_MANIFEST", "Env:${Prefix}_CAPTURE_FRAMES", "Env:${Prefix}_HEADLESS", "Env:${Prefix}_WINDOW_WIDTH", "Env:${Prefix}_WINDOW_HEIGHT" -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $manifestPath -Force -ErrorAction SilentlyContinue
+        if ($proc -and $proc.ExitCode -eq 0) {
+            Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue
+        }
     }
 
     foreach ($capture in $captures) {

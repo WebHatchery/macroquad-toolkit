@@ -111,6 +111,116 @@ pub struct InputState {
     pub space_pressed: bool,
 }
 
+/// One-frame semantic controller input, available through the browser Gamepad API.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct GamepadFrame {
+    pub connected: bool,
+    pub confirm: bool,
+    pub cancel: bool,
+    pub secondary: bool,
+    pub tertiary: bool,
+    pub menu: bool,
+    pub next: bool,
+    pub previous: bool,
+    pub up: bool,
+    pub down: bool,
+    pub left: bool,
+    pub right: bool,
+}
+
+/// Persistent controller poller. Native builds remain a no-op; Mirexis's published
+/// browser build uses the shared Gamepad API plugin without adding a native backend.
+pub struct GamepadInput {
+    #[cfg(target_arch = "wasm32")]
+    inner: gamepads::Gamepads,
+    #[cfg(target_arch = "wasm32")]
+    stick_latch: (i8, i8),
+}
+
+impl Default for GamepadInput {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl GamepadInput {
+    pub fn new() -> Self {
+        Self {
+            #[cfg(target_arch = "wasm32")]
+            inner: gamepads::Gamepads::new(),
+            #[cfg(target_arch = "wasm32")]
+            stick_latch: (0, 0),
+        }
+    }
+
+    pub fn capture(&mut self) -> GamepadFrame {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            GamepadFrame::default()
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            use gamepads::Button;
+            self.inner.poll();
+            let Some(pad) = self.inner.all().next() else {
+                self.stick_latch = (0, 0);
+                return GamepadFrame::default();
+            };
+            let stick = pad.left_stick();
+            let current = (
+                if stick.0 < -0.55 {
+                    -1
+                } else if stick.0 > 0.55 {
+                    1
+                } else {
+                    0
+                },
+                if stick.1 < -0.55 {
+                    -1
+                } else if stick.1 > 0.55 {
+                    1
+                } else {
+                    0
+                },
+            );
+            let prior = self.stick_latch;
+            self.stick_latch = current;
+            GamepadFrame {
+                connected: true,
+                confirm: pad.is_just_pressed(Button::ActionDown),
+                cancel: pad.is_just_pressed(Button::ActionRight),
+                secondary: pad.is_just_pressed(Button::ActionLeft),
+                tertiary: pad.is_just_pressed(Button::ActionUp),
+                menu: pad.is_just_pressed(Button::RightCenterCluster),
+                next: pad.is_just_pressed(Button::FrontRightUpper),
+                previous: pad.is_just_pressed(Button::FrontLeftUpper),
+                up: pad.is_just_pressed(Button::DPadUp) || (current.1 == 1 && prior.1 != 1),
+                down: pad.is_just_pressed(Button::DPadDown) || (current.1 == -1 && prior.1 != -1),
+                left: pad.is_just_pressed(Button::DPadLeft) || (current.0 == -1 && prior.0 != -1),
+                right: pad.is_just_pressed(Button::DPadRight) || (current.0 == 1 && prior.0 != 1),
+            }
+        }
+    }
+
+    /// Plays a bounded dual-rumble pulse on the first connected controller.
+    /// Browser support depends on the Gamepad vibration actuator; unsupported
+    /// devices and native no-backend builds safely ignore the request.
+    pub fn rumble(&mut self, duration_ms: u32, strong: f32, weak: f32) {
+        #[cfg(target_arch = "wasm32")]
+        if let Some(id) = self.inner.all().next().map(|pad| pad.id()) {
+            self.inner.rumble(
+                id,
+                duration_ms.min(1_000),
+                0,
+                strong.clamp(0.0, 1.0),
+                weak.clamp(0.0, 1.0),
+            );
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        let _ = (duration_ms, strong, weak);
+    }
+}
+
 impl InputState {
     /// Capture current frame's input state
     pub fn capture() -> Self {
@@ -314,63 +424,4 @@ pub fn menu_nav_horizontal() -> i32 {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn menu_cursor_wraps_both_directions() {
-        let mut cursor = MenuCursor::new(3);
-        cursor.select_prev();
-        assert_eq!(cursor.index(), 2);
-        cursor.select_next();
-        assert_eq!(cursor.index(), 0);
-        cursor.select_next();
-        assert_eq!(cursor.index(), 1);
-    }
-
-    #[test]
-    fn menu_cursor_navigate_reports_movement() {
-        let mut cursor = MenuCursor::new(2);
-        assert!(!cursor.navigate(0));
-        assert!(cursor.navigate(1));
-        assert_eq!(cursor.index(), 1);
-        assert!(cursor.navigate(-1));
-        assert_eq!(cursor.index(), 0);
-    }
-
-    #[test]
-    fn menu_cursor_clamps_on_resize_and_set() {
-        let mut cursor = MenuCursor::new(5);
-        cursor.set_index(4);
-        cursor.set_len(3);
-        assert_eq!(cursor.index(), 2);
-        cursor.set_index(99);
-        assert_eq!(cursor.index(), 2);
-    }
-
-    #[test]
-    fn empty_menu_cursor_is_inert() {
-        let mut cursor = MenuCursor::new(0);
-        assert!(cursor.is_empty());
-        assert!(!cursor.navigate(1));
-        cursor.select_prev();
-        assert_eq!(cursor.index(), 0);
-    }
-
-    #[test]
-    fn hit_test_returns_first_matching_target() {
-        let targets = [
-            HitTarget::new(Rect::new(0.0, 0.0, 10.0, 10.0), "first"),
-            HitTarget::new(Rect::new(0.0, 0.0, 20.0, 20.0), "second"),
-        ];
-
-        assert_eq!(hit_test(targets, vec2(5.0, 5.0)), Some("first"));
-    }
-
-    #[test]
-    fn hit_test_ignores_points_outside_targets() {
-        let targets = [HitTarget::new(Rect::new(0.0, 0.0, 10.0, 10.0), 7)];
-
-        assert_eq!(hit_test(targets, vec2(12.0, 5.0)), None);
-    }
-}
+mod tests;
