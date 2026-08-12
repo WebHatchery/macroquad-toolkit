@@ -48,6 +48,7 @@
 
 // Core 2D modules (existing)
 pub mod achievements;
+pub mod artwork;
 pub mod assets;
 pub mod audio;
 pub mod camera;

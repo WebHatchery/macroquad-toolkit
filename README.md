@@ -162,6 +162,29 @@ This rule exists to keep UIs visually stable across:
 
 ### Assets (`assets` module)
 
+The repository also includes a small reference art pack for examples and
+smoke-test scenes: an archivist portrait, a 4x2 drone sprite atlas, a
+standalone billboard frame, a semantic icon sheet, and a missing-texture
+fallback. Load it through the normal texture-manifest path:
+
+```rust,no_run
+use macroquad_toolkit::assets::AssetManager;
+let mut assets = AssetManager::new();
+let loaded = macroquad_toolkit::artwork::load_toolkit_artwork(&mut assets).await?;
+assert_eq!(loaded, 5);
+```
+
+The manifest is `assets/artwork_manifest.json`; keys and filtering stay in one
+place so native and WASM builds resolve the same files.
+
+The same pack also ships 50 individual 48px semantic glyphs. Load those when a
+screen needs named icons rather than atlas coordinates:
+
+```rust,no_run
+let loaded = macroquad_toolkit::artwork::load_toolkit_icons(&mut assets).await;
+assert_eq!(loaded, 50);
+```
+
 ```rust
 use macroquad_toolkit::assets::AssetManager;
 

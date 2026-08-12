@@ -1,0 +1,9 @@
+{
+  "textures": [
+    { "key": "portrait_archivist_neutral", "path": "assets/images/portraits/portrait_archivist_neutral.png", "filter": "linear" },
+    { "key": "drone_atlas", "path": "assets/images/sprites/drone_atlas.png", "filter": "nearest" },
+    { "key": "drone_billboard", "path": "assets/images/sprites/drone_billboard.png", "filter": "nearest" },
+    { "key": "semantic_icons", "path": "assets/images/ui/icons/semantic_icons.png", "filter": "linear" },
+    { "key": "missing_texture", "path": "assets/images/missing_texture.png", "filter": "nearest" }
+  ]
+}
