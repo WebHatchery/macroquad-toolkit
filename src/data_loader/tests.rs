@@ -56,3 +56,30 @@ fn test_data_registry() {
     assert!(registry.contains("sword"));
     assert_eq!(registry.get("sword").unwrap().name, "Iron Sword");
 }
+
+#[test]
+fn source_text_prefers_an_existing_runtime_file() {
+    let path = std::env::temp_dir().join(format!(
+        "macroquad_toolkit_data_loader_{}.json",
+        std::process::id()
+    ));
+    std::fs::write(&path, "runtime").expect("write temporary data source");
+
+    let loaded = load_text_with_fallback_sync("test data", std::slice::from_ref(&path), "embedded")
+        .expect("load runtime source");
+
+    std::fs::remove_file(&path).expect("remove temporary data source");
+    assert_eq!(loaded, "runtime");
+}
+
+#[test]
+fn source_text_uses_the_embedded_copy_when_runtime_data_is_missing() {
+    let missing = std::env::temp_dir().join(format!(
+        "macroquad_toolkit_missing_data_{}.json",
+        std::process::id()
+    ));
+    let loaded =
+        load_text_with_fallback_sync("test data", &[missing], "embedded").expect("use fallback");
+
+    assert_eq!(loaded, "embedded");
+}

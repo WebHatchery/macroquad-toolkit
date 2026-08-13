@@ -199,6 +199,48 @@ pub fn first_existing_path<'a>(candidates: impl IntoIterator<Item = &'a str>) ->
         .find(|path| path.exists())
 }
 
+/// Load source text from the first existing native path, or use an embedded
+/// copy when no runtime filesystem is available.
+///
+/// Browser packages commonly place assets in an archive rather than exposing
+/// loose files. In that environment the embedded copy is authoritative and no
+/// network request is attempted.
+#[cfg(not(target_arch = "wasm32"))]
+pub fn load_text_with_fallback_sync(
+    label: &str,
+    path_candidates: &[PathBuf],
+    embedded: &str,
+) -> Result<String, String> {
+    for path in path_candidates {
+        if path.exists() {
+            return std::fs::read_to_string(path)
+                .map_err(|error| format!("Data file read error in '{}': {error}", path.display()));
+        }
+    }
+
+    if embedded.is_empty() {
+        Err(format!(
+            "Data source '{label}' has no runtime or embedded copy"
+        ))
+    } else {
+        Ok(embedded.to_string())
+    }
+}
+
+/// WASM counterpart to [`load_text_with_fallback_sync`].
+#[cfg(target_arch = "wasm32")]
+pub fn load_text_with_fallback_sync(
+    label: &str,
+    _path_candidates: &[PathBuf],
+    embedded: &str,
+) -> Result<String, String> {
+    if embedded.is_empty() {
+        Err(format!("Data source '{label}' has no embedded copy"))
+    } else {
+        Ok(embedded.to_string())
+    }
+}
+
 /// Load JSON from the first existing native path, or from embedded JSON if no path exists.
 #[cfg(not(target_arch = "wasm32"))]
 pub fn load_json_with_fallback_sync<T: DeserializeOwned>(
