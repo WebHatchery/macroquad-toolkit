@@ -2,6 +2,9 @@
 
 use macroquad::prelude::*;
 
+pub mod gestures;
+pub use gestures::{GestureTouch, TouchGesture, TouchGestureFrame};
+
 /// Current mouse position as a `Vec2`.
 pub fn mouse_position_vec2() -> Vec2 {
     let (mx, my) = mouse_position();
