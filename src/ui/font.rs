@@ -136,6 +136,24 @@ pub fn prewarm_default_ui_font(sizes: &[u16]) -> Result<(), String> {
     Ok(())
 }
 
+/// Populate only the characters a specific large text style will draw.
+///
+/// This avoids spending atlas space on a full alphabet when a 40–80px style is
+/// reserved for formatted prices or clocks.
+pub fn prewarm_default_ui_font_text(samples: &[(u16, &str)]) -> Result<(), String> {
+    ensure_default_ui_font()?;
+    let Some(font) = registered_default_ui_font() else {
+        return Ok(());
+    };
+    for (size, text) in samples.iter().copied().filter(|(size, _)| *size > 0) {
+        let mut characters: Vec<char> = text.chars().collect();
+        characters.sort_unstable();
+        characters.dedup();
+        font.populate_font_cache(&characters, size);
+    }
+    Ok(())
+}
+
 /// Queue one off-screen draw for every populated UI-font size.
 ///
 /// Call this after [`prewarm_default_ui_font`], then present the frame before
@@ -146,6 +164,14 @@ pub fn draw_default_ui_font_atlas_warmup(sizes: &[u16]) {
     const WARMUP_TEXT: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789 !@#$%^&*()[]{}.,:;'\"?/\\|_+-=<>—";
     for size in sizes.iter().copied().filter(|size| *size > 0) {
         draw_ui_text(WARMUP_TEXT, -2_000.0, -2_000.0, f32::from(size), WHITE);
+    }
+}
+
+/// Queue targeted off-screen draws for styles prewarmed with
+/// [`prewarm_default_ui_font_text`]. Present the frame once before real UI.
+pub fn draw_default_ui_font_text_atlas_warmup(samples: &[(u16, &str)]) {
+    for (size, text) in samples.iter().copied().filter(|(size, _)| *size > 0) {
+        draw_ui_text(text, -2_000.0, -2_000.0, f32::from(size), WHITE);
     }
 }
 
