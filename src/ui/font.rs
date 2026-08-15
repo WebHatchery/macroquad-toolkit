@@ -136,6 +136,19 @@ pub fn prewarm_default_ui_font(sizes: &[u16]) -> Result<(), String> {
     Ok(())
 }
 
+/// Queue one off-screen draw for every populated UI-font size.
+///
+/// Call this after [`prewarm_default_ui_font`], then present the frame before
+/// batching the first real screen. Macroquad can otherwise retain texture
+/// coordinates from before a custom-font atlas finished growing, corrupting a
+/// dense first frame even though every glyph is already cached.
+pub fn draw_default_ui_font_atlas_warmup(sizes: &[u16]) {
+    const WARMUP_TEXT: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ abcdefghijklmnopqrstuvwxyz 0123456789 !@#$%^&*()[]{}.,:;'\"?/\\|_+-=<>—";
+    for size in sizes.iter().copied().filter(|size| *size > 0) {
+        draw_ui_text(WARMUP_TEXT, -2_000.0, -2_000.0, f32::from(size), WHITE);
+    }
+}
+
 /// Return the registered default UI font, loading the bundled Rajdhani font if needed.
 pub fn default_ui_font() -> Option<&'static Font> {
     if uses_macroquad_default_font() {
