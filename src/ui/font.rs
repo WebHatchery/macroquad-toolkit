@@ -115,6 +115,27 @@ pub fn ensure_default_ui_font() -> Result<(), String> {
     Ok(())
 }
 
+/// Populate the custom UI font atlas before a text-heavy frame is batched.
+///
+/// Macroquad adds custom-font glyphs lazily. If an atlas grows midway through a
+/// dense frame, draw calls recorded against the earlier texture layout can show
+/// stale glyph cells. Games can call this once at startup with the font sizes
+/// used by their UI to make those atlas changes happen before rendering.
+pub fn prewarm_default_ui_font(sizes: &[u16]) -> Result<(), String> {
+    ensure_default_ui_font()?;
+    let Some(font) = registered_default_ui_font() else {
+        return Ok(());
+    };
+    let mut characters = Font::latin_character_list();
+    characters.extend(" -+/$|'?_<>;=~%#&@!…—–×⚙".chars());
+    characters.sort_unstable();
+    characters.dedup();
+    for size in sizes.iter().copied().filter(|size| *size > 0) {
+        font.populate_font_cache(&characters, size);
+    }
+    Ok(())
+}
+
 /// Return the registered default UI font, loading the bundled Rajdhani font if needed.
 pub fn default_ui_font() -> Option<&'static Font> {
     if uses_macroquad_default_font() {
