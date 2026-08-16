@@ -102,6 +102,20 @@ fn a_control_already_large_enough_is_untouched() {
 }
 
 #[test]
+fn scaled_ui_still_provides_a_physical_44_point_target() {
+    let scale = 320.0 / 360.0;
+    let touch = touch_area_for_scale(Rect::new(100.0, 100.0, 44.0, 44.0), scale);
+    assert!((touch.w * scale - MIN_TARGET).abs() < 0.01, "{:?}", touch);
+    assert!((touch.h * scale - MIN_TARGET).abs() < 0.01, "{:?}", touch);
+}
+
+#[test]
+fn nonsensical_ui_scale_falls_back_to_logical_target_size() {
+    let rect = Rect::new(0.0, 0.0, 20.0, 20.0);
+    assert_eq!(touch_area_for_scale(rect, 0.0), touch_area(rect));
+}
+
+#[test]
 fn only_the_short_side_grows() {
     let touch = touch_area(Rect::new(0.0, 0.0, 300.0, 28.0));
     assert!((touch.w - 300.0).abs() < 1e-3);

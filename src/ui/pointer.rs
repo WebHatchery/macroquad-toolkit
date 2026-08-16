@@ -197,6 +197,15 @@ pub fn touch_area(rect: Rect) -> Rect {
     NEIGHBOURS.with(|slot| touch_area_among(rect, &slot.borrow().last))
 }
 
+/// Grow a logical control until its on-screen hit area reaches 44 points.
+///
+/// `ui_scale` is the scale used to draw the virtual UI into the physical
+/// viewport. A 44-logical-pixel control drawn at 0.75 scale is only 33 points
+/// on glass, so its logical hit area must grow to `44 / 0.75`.
+pub fn touch_area_for_scale(rect: Rect, ui_scale: f32) -> Rect {
+    NEIGHBOURS.with(|slot| touch_area_among_for_scale(rect, &slot.borrow().last, ui_scale))
+}
+
 /// Grow a control's hit area as far as its neighbours allow.
 ///
 /// The unconstrained version was wrong and the audit said so: on a narrow
@@ -210,9 +219,19 @@ pub fn touch_area(rect: Rect) -> Rect {
 /// room takes the full standard; one in a tight row takes what is going and
 /// stays unambiguous.
 pub fn touch_area_among(rect: Rect, others: &[Rect]) -> Rect {
-    let mut left = ((MIN_TARGET - rect.w) * 0.5).max(0.0);
+    touch_area_among_for_scale(rect, others, 1.0)
+}
+
+/// Scale-aware form of [`touch_area_among`].
+pub fn touch_area_among_for_scale(rect: Rect, others: &[Rect], ui_scale: f32) -> Rect {
+    let target = if ui_scale.is_finite() && ui_scale > 0.0 {
+        MIN_TARGET / ui_scale
+    } else {
+        MIN_TARGET
+    };
+    let mut left = ((target - rect.w) * 0.5).max(0.0);
     let mut right = left;
-    let mut up = ((MIN_TARGET - rect.h) * 0.5).max(0.0);
+    let mut up = ((target - rect.h) * 0.5).max(0.0);
     let mut down = up;
 
     for other in others {
