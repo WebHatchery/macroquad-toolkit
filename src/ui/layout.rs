@@ -134,14 +134,33 @@ pub struct VirtualUi {
 
 impl VirtualUi {
     pub fn new(logical_width: f32, logical_height: f32) -> Self {
-        let scale_x = screen_width() / logical_width;
-        let scale_y = screen_height() / logical_height;
+        Self::from_screen_size(
+            logical_width,
+            logical_height,
+            screen_width(),
+            screen_height(),
+        )
+    }
+
+    /// Build a virtual UI mapper for an injected logical screen size.
+    ///
+    /// Runtime code normally uses [`Self::new`]. The injected form keeps
+    /// responsive layout and input-alignment tests independent of a live
+    /// Macroquad window.
+    pub fn from_screen_size(
+        logical_width: f32,
+        logical_height: f32,
+        screen_width: f32,
+        screen_height: f32,
+    ) -> Self {
+        let scale_x = screen_width / logical_width;
+        let scale_y = screen_height / logical_height;
         let scale = scale_x.min(scale_y);
         let viewport_width = logical_width * scale;
         let viewport_height = logical_height * scale;
         let offset = vec2(
-            (screen_width() - viewport_width) * 0.5,
-            (screen_height() - viewport_height) * 0.5,
+            (screen_width - viewport_width) * 0.5,
+            (screen_height - viewport_height) * 0.5,
         );
 
         Self {
@@ -196,6 +215,16 @@ impl VirtualUi {
 
     pub fn screen_to_ui(&self, point: Vec2) -> Vec2 {
         (point - self.offset) / self.scale
+    }
+
+    /// Map a screen point only when it lies inside the rendered UI viewport.
+    pub fn screen_to_ui_checked(&self, point: Vec2) -> Option<Vec2> {
+        let mapped = self.screen_to_ui(point);
+        (mapped.x >= 0.0
+            && mapped.y >= 0.0
+            && mapped.x <= self.logical_width
+            && mapped.y <= self.logical_height)
+            .then_some(mapped)
     }
 
     pub fn ui_to_screen(&self, point: Vec2) -> Vec2 {

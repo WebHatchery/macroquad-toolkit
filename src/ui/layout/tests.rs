@@ -50,3 +50,17 @@ fn screen_to_ui_is_dpi_independent() {
     assert_eq!(ui.screen_to_ui(vec2(420.0, 220.0)), vec2(640.0, 360.0));
     assert_eq!(ui.ui_to_screen(vec2(640.0, 360.0)), vec2(420.0, 220.0));
 }
+
+#[test]
+fn injected_screen_size_preserves_aspect_and_rejects_letterbox_input() {
+    let ui = VirtualUi::from_screen_size(1280.0, 720.0, 1024.0, 768.0);
+
+    assert!((ui.scale - 0.8).abs() < f32::EPSILON);
+    assert_eq!(ui.offset, vec2(0.0, 96.0));
+    assert_eq!(ui.viewport_for_dpi(1.0), (0, 96, 1024, 576));
+    assert_eq!(ui.screen_to_ui_checked(vec2(512.0, 10.0)), None);
+    assert_eq!(
+        ui.screen_to_ui_checked(ui.ui_to_screen(vec2(640.0, 360.0))),
+        Some(vec2(640.0, 360.0))
+    );
+}
