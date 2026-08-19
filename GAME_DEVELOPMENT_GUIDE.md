@@ -62,6 +62,32 @@ serde_json = "1.0"
 
 > Macroquad should remain a *thin* rendering/input layer.
 
+### Client/server games
+
+For a persistent multiplayer game, keep the boundary explicit from the first
+slice:
+
+- the client renders a server-owned projection and sends intent-like commands;
+- the server owns validation, simulation time, shared world state, and durable
+  persistence;
+- a small protocol crate contains the wire types used by both sides;
+- the client keeps only UI preferences and credentials locally, unless an
+  offline mode is deliberately part of the design.
+
+Enable the toolkit's optional `net` feature for the client transport:
+
+```toml
+macroquad-toolkit = { path = "../macroquad-toolkit", features = ["net"] }
+```
+
+`macroquad_toolkit::net::HttpClient` and `Pending<T>` provide non-blocking JSON
+HTTP on native and WASM. Games still implement their own endpoint vocabulary,
+protocol types, session handshake, reconnect state, server authority, CORS,
+authentication verification, and database schema. Poll requests once per frame
+with a finite timeout; on failure retain the last safe projection, show the
+connection state, and retry through an application-owned cooldown. The shared
+publisher supplies the `quad-net.js` browser bridge for WebGL packages.
+
 ---
 
 ## Project Structure

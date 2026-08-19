@@ -38,6 +38,7 @@
 //! - [`data_loader`] - JSON data loading patterns
 //! - [`assets`] - Asset management and texture loading
 //! - [`raster`] - CPU-side pixel drawing onto images for procedural art
+//! - [`net`] - Optional non-blocking JSON HTTP client for authoritative servers
 //!
 //! ## Other
 //! - [`audio`] - Audio playback utilities
@@ -60,6 +61,8 @@ pub mod events;
 pub mod fx;
 pub mod input;
 pub mod math;
+#[cfg(feature = "net")]
+pub mod net;
 pub mod paint;
 pub mod raster;
 pub mod reveal;
@@ -144,4 +147,10 @@ pub mod prelude_3d {
 pub mod prelude_data {
     pub use crate::data_loader::*;
     pub use crate::persistence::*;
+}
+
+/// Re-exports for clients that enable the optional `net` feature.
+#[cfg(feature = "net")]
+pub mod prelude_net {
+    pub use crate::net::{HttpClient, HttpMethod, Pending};
 }

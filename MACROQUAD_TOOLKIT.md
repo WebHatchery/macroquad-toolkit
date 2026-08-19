@@ -28,6 +28,7 @@ A collection of common utilities for Macroquad game development, extracted from 
 - **Hover tooltip**: delayed, fading tooltip state (`HoverTooltip`)
 - **Plaques**: ornamented title/menu buttons with corner marks and style hooks
 - **Menu cursor**: wrap-around keyboard selection for pause/settings menus
+- **Optional networking**: frame-polled JSON HTTP for native and WASM clients
 
 ## Usage
 
@@ -82,6 +83,51 @@ let runtime: GameConfig =
 ```
 
 Use `parse_json_labeled` when JSON already arrived as a string. Do not create project-local generic wrappers around `serde_json`; the toolkit provides consistent source names, line/column diagnostics, native/WASM loading, and embedded fallback support.
+
+### Client/server networking (`net` feature)
+
+Authoritative games can enable the optional transport without copying the
+cross-platform HTTP bridge:
+
+```toml
+macroquad-toolkit = { path = "../macroquad-toolkit", features = ["net"] }
+```
+
+The feature provides [`net::HttpClient`] and [`net::Pending<T>`]. The client
+owns its protocol structs, endpoint paths, session lifecycle, retry policy, and
+server; the toolkit owns only request construction, shared headers, JSON
+encoding/decoding, and frame-polled completion:
+
+```rust,ignore
+use macroquad_toolkit::net::{HttpClient, Pending};
+use serde::{Deserialize, Serialize};
+
+#[derive(Deserialize)]
+struct WorldView { tick: u64 }
+#[derive(Serialize)]
+struct MoveCommand { x: i32, y: i32 }
+
+let mut api = HttpClient::new("https://example.test/api");
+api.set_header("X-Session-Id", "session-id");
+api.set_bearer_token(Some("account-token"));
+let mut view: Pending<WorldView> = api.get("/view");
+let mut move_request: Pending<WorldView> =
+    api.post_json("/move", &MoveCommand { x: 1, y: 2 });
+
+// In the Macroquad update loop, never block on either request.
+if let Some(result) = view.poll_timed(dt, 6.0) {
+    // Adopt the server projection or surface the transport/JSON error.
+}
+if let Some(result) = move_request.poll_timed(dt, 6.0) {
+    // Apply server feedback.
+}
+```
+
+`poll_timed` is important for WASM because the browser bridge cannot report a
+refused connection as a normal response. A timeout should transition the
+game's connection state and be followed by an application-owned retry
+cooldown. The shared RustGames publisher includes `quad-net.js` in WebGL
+packages when this feature is used.
 
 ### Input (`input` module)
 

@@ -7,7 +7,8 @@ A collection of common utilities for Macroquad game development, extracted from 
 > modules this file does not — math, timing, fx, form widgets, scroll and tabs,
 > settings, achievements, the debug overlay, raster, and the capture harness.
 > This README keeps the sections that live only here: the text layout rule, and
-> persistence, audio, states, and the optional `db` feature.
+> persistence, audio, states, the optional `db` feature, and the optional `net`
+> feature for authoritative client/server games.
 
 ## Features
 
@@ -22,6 +23,7 @@ A collection of common utilities for Macroquad game development, extracted from 
 - **Color palettes**: Consistent dark theme colors
 - **Sprite system**: Builder pattern for texture rendering with transformations
 - **Bounded text layout**: Helpers for measuring, wrapping, fitting, truncating, and drawing text inside UI boxes
+- **Optional networking**: Frame-polled JSON HTTP for native and WASM clients
 
 ## Usage
 
@@ -30,6 +32,12 @@ Add to your `Cargo.toml`:
 ```toml
 [dependencies]
 macroquad-toolkit = { path = "../macroquad-toolkit" }
+```
+
+Client/server games should opt into the transport feature:
+
+```toml
+macroquad-toolkit = { path = "../macroquad-toolkit", features = ["net"] }
 ```
 
 ### Quick Start
