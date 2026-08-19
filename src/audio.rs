@@ -47,6 +47,16 @@ impl<T: SoundId> SoundManager<T> {
         }
     }
 
+    /// Decode generated or packed bytes and associate them with an ID. This
+    /// keeps procedural audio on the same playback path as file-backed audio.
+    pub async fn load_sound_bytes(&mut self, id: T, bytes: &[u8]) -> Result<(), String> {
+        let sound = load_sound_from_bytes(bytes)
+            .await
+            .map_err(|error| format!("Failed to decode generated sound: {error:?}"))?;
+        self.sounds.insert(id, sound);
+        Ok(())
+    }
+
     /// Load a ZIP asset pack. Later `load_sound` calls check loaded packs before loose files.
     pub async fn load_asset_pack(&mut self, path: &str) -> Result<usize, String> {
         let pack = AssetPack::load(path).await?;
