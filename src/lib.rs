@@ -63,6 +63,7 @@ pub mod input;
 pub mod math;
 #[cfg(feature = "net")]
 pub mod net;
+pub mod noise;
 pub mod paint;
 pub mod raster;
 pub mod reveal;

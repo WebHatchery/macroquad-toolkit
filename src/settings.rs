@@ -11,12 +11,19 @@
 
 use macroquad::window::set_fullscreen;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::persistence::{load_json_key, save_json_key};
 use crate::ui::set_ui_text_scale;
 
 /// Storage key used by [`GameSettings::load`] and [`GameSettings::save`].
 pub const SETTINGS_KEY: &str = "settings";
+static REDUCED_MOTION: AtomicBool = AtomicBool::new(false);
+
+pub fn reduced_motion_enabled() -> bool {
+    REDUCED_MOTION.load(Ordering::Relaxed)
+}
 
 /// Common user settings shared by most games.
 ///
@@ -50,6 +57,11 @@ pub struct GameSettings {
     pub autosave_interval: f32,
     /// Preferred initial simulation speed for games that expose speed controls.
     pub default_speed: i32,
+    /// Disables pulses, shakes, and impact particles while preserving state
+    /// changes and readable status indicators.
+    pub reduced_motion: bool,
+    /// Supplementary keyboard labels. Touch actions remain the primary path.
+    pub key_bindings: BTreeMap<String, String>,
 }
 
 impl Default for GameSettings {
@@ -64,6 +76,11 @@ impl Default for GameSettings {
             ui_text_scale: 1.0,
             autosave_interval: 30.0,
             default_speed: 1,
+            reduced_motion: false,
+            key_bindings: BTreeMap::from([
+                ("pause".to_string(), "Space".to_string()),
+                ("help".to_string(), "F1".to_string()),
+            ]),
         }
     }
 }
@@ -96,6 +113,7 @@ impl GameSettings {
     pub fn apply_display(&self) {
         set_fullscreen(self.fullscreen);
         set_ui_text_scale(self.ui_text_scale);
+        REDUCED_MOTION.store(self.reduced_motion, Ordering::Relaxed);
     }
 
     /// Flips fullscreen and immediately applies it to the window.
@@ -112,7 +130,12 @@ impl GameSettings {
         self.music_volume = self.music_volume.clamp(0.0, 1.0);
         self.ui_text_scale = self.ui_text_scale.clamp(0.25, 4.0);
         self.autosave_interval = self.autosave_interval.clamp(5.0, 600.0);
-        self.default_speed = self.default_speed.clamp(1, 4);
+        self.default_speed = self.default_speed.clamp(0, 4);
+        for binding in self.key_bindings.values_mut() {
+            if binding.is_empty() {
+                *binding = "Unassigned".to_string();
+            }
+        }
     }
 }
 
