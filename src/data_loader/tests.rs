@@ -8,6 +8,11 @@ struct TestItem {
     value: i32,
 }
 
+#[derive(Debug, Deserialize, PartialEq)]
+struct NonCloneItem {
+    id: String,
+}
+
 #[test]
 fn test_load_embedded_json() {
     let json = r#"[
@@ -44,6 +49,19 @@ fn test_load_embedded_json_map() {
 }
 
 #[test]
+fn duplicate_ids_are_rejected_instead_of_overwritten() {
+    let json = r#"[
+        {"id": "sword", "name": "Iron Sword", "value": 100},
+        {"id": "sword", "name": "Cursed Sword", "value": 1}
+    ]"#;
+
+    let error = load_embedded_json_map::<TestItem>(json, "id")
+        .expect_err("duplicate data IDs should fail validation");
+
+    assert!(error.contains("Duplicate 'id' value 'sword'"));
+}
+
+#[test]
 fn test_data_registry() {
     let json = r#"[
         {"id": "sword", "name": "Iron Sword", "value": 100},
@@ -55,6 +73,15 @@ fn test_data_registry() {
     assert_eq!(registry.len(), 2);
     assert!(registry.contains("sword"));
     assert_eq!(registry.get("sword").unwrap().name, "Iron Sword");
+}
+
+#[test]
+fn data_registry_does_not_require_cloneable_items() {
+    let registry: DataRegistry<NonCloneItem> =
+        DataRegistry::from_embedded_json(r#"[{"id":"only"}]"#, "id")
+            .expect("non-Clone data should still be registry-compatible");
+
+    assert_eq!(registry.get("only").unwrap().id, "only");
 }
 
 #[test]

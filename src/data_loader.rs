@@ -119,13 +119,11 @@ pub fn load_many_embedded_json<T: DeserializeOwned>(
 /// const DATA: &str = macroquad_toolkit::include_json_str!("../data/items.json");
 /// let items: HashMap<String, Item> = load_embedded_json_map(DATA, "id")?;
 /// ```
-pub fn load_embedded_json_map<T: DeserializeOwned + Clone>(
+pub fn load_embedded_json_map<T: DeserializeOwned>(
     json_str: &str,
     id_field: &str,
 ) -> Result<HashMap<String, T>, String> {
-    // First parse as array of generic JSON values
-    let values: Vec<serde_json::Value> =
-        serde_json::from_str(json_str).map_err(|e| format!("JSON parse error: {}", e))?;
+    let values: Vec<serde_json::Value> = parse_json_labeled("embedded JSON", json_str)?;
 
     let mut map = HashMap::new();
 
@@ -137,7 +135,13 @@ pub fn load_embedded_json_map<T: DeserializeOwned + Clone>(
             .ok_or_else(|| format!("Missing or invalid '{}' field", id_field))?
             .to_string();
 
-        // Parse the full object
+        if map.contains_key(&id) {
+            return Err(format!(
+                "Duplicate '{}' value '{}' in embedded JSON",
+                id_field, id
+            ));
+        }
+
         let item: T = serde_json::from_value(value)
             .map_err(|e| format!("Failed to parse item '{}': {}", id, e))?;
 
@@ -313,7 +317,7 @@ pub struct DataRegistry<T> {
     data: HashMap<String, T>,
 }
 
-impl<T: Clone> DataRegistry<T> {
+impl<T> DataRegistry<T> {
     /// Create an empty registry
     pub fn new() -> Self {
         Self {
@@ -372,13 +376,13 @@ impl<T: Clone> DataRegistry<T> {
     }
 }
 
-impl<T: Clone> Default for DataRegistry<T> {
+impl<T> Default for DataRegistry<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: Clone + DeserializeOwned> DataRegistry<T> {
+impl<T: DeserializeOwned> DataRegistry<T> {
     /// Load from embedded JSON array with ID field
     pub fn from_embedded_json(json_str: &str, id_field: &str) -> Result<Self, String> {
         let map = load_embedded_json_map(json_str, id_field)?;

@@ -96,3 +96,44 @@ fn test_closure_based_pathfinding() {
     assert_eq!(path.goal(), Some(Pos::new(4, 2)));
     assert!(path.waypoints.contains(&Pos::new(2, 4)));
 }
+
+#[test]
+fn cache_keeps_search_modes_separate() {
+    let grid = PathfindingGrid::new(10, 10);
+    let mut cache = PathCache::new(8);
+    let start = Pos::new(0, 0);
+    let goal = Pos::new(5, 5);
+
+    let diagonal = cache
+        .find_path_cached(start, goal, &grid, Heuristic::Euclidean, true)
+        .expect("the diagonal route exists");
+    let four_way = cache
+        .find_path_cached(start, goal, &grid, Heuristic::Manhattan, false)
+        .expect("the four-way route exists");
+
+    assert!(diagonal.len() < four_way.len());
+    assert_eq!(cache.stats().cached_paths, 2);
+}
+
+#[test]
+fn invalid_grid_costs_are_ignored_instead_of_poisoning_the_grid() {
+    let mut grid = PathfindingGrid::new(3, 1);
+    let middle = Pos::new(1, 0);
+
+    grid.set_cost(middle, f32::NAN);
+    assert_eq!(grid.get_cost(middle), 1.0);
+    grid.set_cost(middle, -1.0);
+    assert_eq!(grid.get_cost(middle), 1.0);
+}
+
+#[test]
+fn negative_region_bounds_do_not_wrap_to_the_far_edge() {
+    let mut grid = PathfindingGrid::new(3, 3);
+
+    grid.set_region_walkable(Pos::new(0, 0), Pos::new(-1, 2), false);
+    grid.set_region_cost(Pos::new(0, 0), Pos::new(-1, 2), 4.0);
+
+    assert!(grid.is_walkable(Pos::new(0, 0)));
+    assert_eq!(grid.get_cost(Pos::new(0, 0)), 1.0);
+    assert!(grid.is_walkable(Pos::new(2, 2)));
+}
