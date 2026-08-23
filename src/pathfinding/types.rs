@@ -155,14 +155,10 @@ impl PathfindingGrid {
     /// Clear all obstacles (make everything walkable)
     pub fn clear(&mut self) {
         for row in &mut self.walkable {
-            for cell in row {
-                *cell = true;
-            }
+            row.fill(true);
         }
         for row in &mut self.cost {
-            for cell in row {
-                *cell = 1.0;
-            }
+            row.fill(1.0);
         }
     }
 }
