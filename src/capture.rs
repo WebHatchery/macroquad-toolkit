@@ -156,6 +156,14 @@ pub async fn run_capture_once<F: FnMut(f32)>(config: &CaptureConfig, mut frame: 
     // builds its `Conf` by hand and never called `capture_window_conf`.
     headless::arm(&config.prefix);
 
+    // Games commonly load a persisted windowed preference after `Conf` has
+    // created the window. Reassert capture fullscreen after game startup and
+    // give the platform one event-loop turn to resize the framebuffer.
+    if env_bool(&format!("{}_CAPTURE_FULLSCREEN", config.prefix), false) {
+        set_fullscreen(true);
+        next_frame().await;
+    }
+
     let mut rendered = 0;
     loop {
         frame(config.timestep);
