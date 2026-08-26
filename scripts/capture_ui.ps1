@@ -32,6 +32,9 @@ param(
     [int]$MinBytes = 40000,
     [switch]$SkipBuild,
     [switch]$Release,
+    # Requests a fullscreen capture surface. Its size is the active monitor's
+    # native framebuffer; WindowWidth/WindowHeight are ignored by the platform.
+    [switch]$Fullscreen,
     # Captures run with the game window hidden (macroquad_toolkit::capture::headless).
     # -Visible puts it back on the desktop, for when a capture comes out wrong
     # and you want to watch the scene play out.
@@ -88,6 +91,7 @@ try {
     Set-Item -Path "Env:${Prefix}_CAPTURE_FRAMES" -Value "$Frames"
     if ($WindowWidth -gt 0) { Set-Item -Path "Env:${Prefix}_WINDOW_WIDTH" -Value "$WindowWidth" }
     if ($WindowHeight -gt 0) { Set-Item -Path "Env:${Prefix}_WINDOW_HEIGHT" -Value "$WindowHeight" }
+    Set-Item -Path "Env:${Prefix}_CAPTURE_FULLSCREEN" -Value $(if ($Fullscreen) { "1" } else { "0" })
     Set-Item -Path "Env:${Prefix}_HEADLESS" -Value $(if ($Visible) { "0" } else { "1" })
     $stdoutPath = Join-Path $outDir (".capture_stdout_{0}.log" -f $PID)
     $stderrPath = Join-Path $outDir (".capture_stderr_{0}.log" -f $PID)
@@ -117,7 +121,7 @@ try {
         }
     }
     finally {
-        Remove-Item "Env:${Prefix}_CAPTURE_MANIFEST", "Env:${Prefix}_CAPTURE_FRAMES", "Env:${Prefix}_HEADLESS", "Env:${Prefix}_WINDOW_WIDTH", "Env:${Prefix}_WINDOW_HEIGHT" -ErrorAction SilentlyContinue
+        Remove-Item "Env:${Prefix}_CAPTURE_MANIFEST", "Env:${Prefix}_CAPTURE_FRAMES", "Env:${Prefix}_HEADLESS", "Env:${Prefix}_WINDOW_WIDTH", "Env:${Prefix}_WINDOW_HEIGHT", "Env:${Prefix}_CAPTURE_FULLSCREEN" -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $manifestPath -Force -ErrorAction SilentlyContinue
         if ($proc -and $proc.ExitCode -eq 0) {
             Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue

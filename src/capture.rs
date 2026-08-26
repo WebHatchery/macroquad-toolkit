@@ -10,6 +10,8 @@
 //! - `PREFIX_CAPTURE_MANIFEST` — tab-separated scene/path rows for a batch
 //! - `PREFIX_CAPTURE_FRAMES` — frames to simulate before capturing (default 150)
 //! - `PREFIX_WINDOW_WIDTH` / `PREFIX_WINDOW_HEIGHT` — window size override
+//! - `PREFIX_CAPTURE_FULLSCREEN` — request a borderless fullscreen framebuffer
+//!   (useful when store media needs the monitor's exact pixel dimensions)
 //! - `PREFIX_HEADLESS` — hide the game window; on by default while capturing,
 //!   set to `0` to watch the run (see [`headless`])
 //!
@@ -117,9 +119,10 @@ pub fn capture_requested(prefix: &str) -> bool {
 
 /// Capture-aware `Conf` for `#[macroquad::main(window_conf)]`.
 ///
-/// Reads `PREFIX_WINDOW_WIDTH/HEIGHT` overrides and disables `high_dpi` while
-/// capturing so the screenshot framebuffer is pixel-aligned with the logical
-/// UI layout (on scaled displays `high_dpi: true` captures at 2x size).
+/// Reads `PREFIX_WINDOW_WIDTH/HEIGHT` and `PREFIX_CAPTURE_FULLSCREEN`
+/// overrides and disables `high_dpi` while capturing so the screenshot
+/// framebuffer is pixel-aligned with the logical UI layout (on scaled displays
+/// `high_dpi: true` captures at 2x size).
 ///
 /// Also arms [`headless`] window hiding. `window_conf()` is the earliest hook a
 /// game has — arming here means the window is hidden as it appears rather than
@@ -137,6 +140,8 @@ pub fn capture_window_conf(
         window_height: env_i32(&format!("{prefix}_WINDOW_HEIGHT"), default_height),
         window_resizable: true,
         high_dpi: !capture_requested(prefix),
+        fullscreen: capture_requested(prefix)
+            && env_bool(&format!("{prefix}_CAPTURE_FULLSCREEN"), false),
         ..Default::default()
     }
 }
