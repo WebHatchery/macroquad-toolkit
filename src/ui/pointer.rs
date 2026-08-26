@@ -167,11 +167,11 @@ impl Pointer {
 #[derive(Default)]
 struct Audit {
     recording: bool,
-    /// Every distinct control seen: (hit side, drawn side, label), smallest
+    /// Every distinct control seen: (hit side, drawn side, label, drawn rect), smallest
     /// hit side first. Both are kept because they answer different questions —
     /// the hit side is what a finger can reach, the drawn side is what an eye
     /// can find, and expansion fixes only the first.
-    seen: Vec<(f32, f32, String)>,
+    seen: Vec<(f32, f32, String, Rect)>,
     /// Grown hit areas, in draw order, for the overlap check.
     areas: Vec<(Rect, String)>,
 }
@@ -350,6 +350,7 @@ pub fn occlude(rect: Rect) {
             return;
         }
         audit.areas.retain(|(area, _)| !hidden(rect, *area));
+        audit.seen.retain(|(_, _, _, area)| !hidden(rect, *area));
     });
     NEIGHBOURS.with(|slot| {
         let mut n = slot.borrow_mut();
@@ -423,7 +424,7 @@ pub fn note_target(label: &str, rect: Rect) {
         let area = touch_area(rect);
         let side = area.w.min(area.h);
         audit.areas.push((area, label.to_owned()));
-        let entry = (side, drawn, label.to_owned());
+        let entry = (side, drawn, label.to_owned(), rect);
         if !audit.seen.contains(&entry) {
             audit.seen.push(entry);
             audit.seen.sort_by(|a, b| a.0.total_cmp(&b.0));
@@ -444,7 +445,7 @@ pub fn smallest_touchable_width(logical_width: f32) -> Option<(f32, String)> {
         audit
             .seen
             .first()
-            .map(|(side, _, label)| (MIN_TARGET * logical_width / side, label.clone()))
+            .map(|(side, _, label, _)| (MIN_TARGET * logical_width / side, label.clone()))
     })
 }
 
@@ -460,8 +461,8 @@ pub fn undersized_targets() -> Vec<(f32, String)> {
             .borrow()
             .seen
             .iter()
-            .filter(|(_, drawn, _)| *drawn < MIN_TARGET)
-            .map(|(_, drawn, label)| (*drawn, label.clone()))
+            .filter(|(_, drawn, _, _)| *drawn < MIN_TARGET)
+            .map(|(_, drawn, label, _)| (*drawn, label.clone()))
             .collect();
         out.sort_by(|a, b| a.0.total_cmp(&b.0));
         out

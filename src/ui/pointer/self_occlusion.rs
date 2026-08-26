@@ -46,6 +46,17 @@ fn a_panel_still_hides_what_is_under_it() {
     );
 }
 
+#[test]
+fn a_panel_hides_covered_controls_from_the_visual_size_report() {
+    begin_target_audit();
+    begin_target_frame();
+    note_target("covered", Rect::new(10.0, 10.0, 20.0, 20.0));
+    occlude(Rect::new(0.0, 0.0, 100.0, 100.0));
+
+    assert!(undersized_targets().is_empty());
+    end_target_audit();
+}
+
 /// Half a pixel of rounding is the same rectangle; ten is not.
 #[test]
 fn the_same_rectangle_is_recognised_through_rounding() {
