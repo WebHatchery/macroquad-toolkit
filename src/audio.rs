@@ -3,7 +3,10 @@
 //! Handles loading and playing sound effects with volume control.
 
 use crate::assets::AssetPack;
-use macroquad::audio::{load_sound, load_sound_from_bytes, play_sound, PlaySoundParams, Sound};
+use macroquad::audio::{
+    load_sound, load_sound_from_bytes, play_sound, set_sound_volume, stop_sound, PlaySoundParams,
+    Sound,
+};
 use std::collections::HashMap;
 
 /// Trait for easier sound indexing (usually an Enum)
@@ -110,6 +113,20 @@ impl<T: SoundId> SoundManager<T> {
 
         if let Some(sound) = self.sounds.get(&id) {
             play_sound(sound, params);
+        }
+    }
+
+    /// Adjust an already-playing sound without restarting it.
+    pub fn set_raw_volume(&self, id: T, volume: f32) {
+        if let Some(sound) = self.sounds.get(&id) {
+            set_sound_volume(sound, volume.clamp(0.0, 1.0));
+        }
+    }
+
+    /// Stop a sound if it has been loaded.
+    pub fn stop_raw(&self, id: T) {
+        if let Some(sound) = self.sounds.get(&id) {
+            stop_sound(sound);
         }
     }
 
