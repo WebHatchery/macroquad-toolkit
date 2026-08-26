@@ -114,7 +114,7 @@ pub struct InputState {
     pub space_pressed: bool,
 }
 
-/// One-frame semantic controller input, available through the browser Gamepad API.
+/// One-frame semantic controller input from the first connected gamepad.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct GamepadFrame {
     pub connected: bool,
@@ -129,14 +129,19 @@ pub struct GamepadFrame {
     pub down: bool,
     pub left: bool,
     pub right: bool,
+    /// Continuous directional state for gameplay movement.
+    pub held_up: bool,
+    pub held_down: bool,
+    pub held_left: bool,
+    pub held_right: bool,
 }
 
-/// Persistent controller poller. Native builds remain a no-op; Mirexis's published
-/// browser build uses the shared Gamepad API plugin without adding a native backend.
+/// Persistent controller poller. Desktop builds use the native `gilrs` backend
+/// supplied by `gamepads`; browser builds use its Gamepad API plugin.
 pub struct GamepadInput {
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(not(target_os = "android"))]
     inner: gamepads::Gamepads,
-    #[cfg(target_arch = "wasm32")]
+    #[cfg(not(target_os = "android"))]
     stick_latch: (i8, i8),
 }
 
@@ -149,19 +154,19 @@ impl Default for GamepadInput {
 impl GamepadInput {
     pub fn new() -> Self {
         Self {
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(not(target_os = "android"))]
             inner: gamepads::Gamepads::new(),
-            #[cfg(target_arch = "wasm32")]
+            #[cfg(not(target_os = "android"))]
             stick_latch: (0, 0),
         }
     }
 
     pub fn capture(&mut self) -> GamepadFrame {
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(target_os = "android")]
         {
             GamepadFrame::default()
         }
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(not(target_os = "android"))]
         {
             use gamepads::Button;
             self.inner.poll();
@@ -169,23 +174,7 @@ impl GamepadInput {
                 self.stick_latch = (0, 0);
                 return GamepadFrame::default();
             };
-            let stick = pad.left_stick();
-            let current = (
-                if stick.0 < -0.55 {
-                    -1
-                } else if stick.0 > 0.55 {
-                    1
-                } else {
-                    0
-                },
-                if stick.1 < -0.55 {
-                    -1
-                } else if stick.1 > 0.55 {
-                    1
-                } else {
-                    0
-                },
-            );
+            let current = stick_direction(pad.left_stick());
             let prior = self.stick_latch;
             self.stick_latch = current;
             GamepadFrame {
@@ -201,15 +190,19 @@ impl GamepadInput {
                 down: pad.is_just_pressed(Button::DPadDown) || (current.1 == -1 && prior.1 != -1),
                 left: pad.is_just_pressed(Button::DPadLeft) || (current.0 == -1 && prior.0 != -1),
                 right: pad.is_just_pressed(Button::DPadRight) || (current.0 == 1 && prior.0 != 1),
+                held_up: pad.is_currently_pressed(Button::DPadUp) || current.1 == 1,
+                held_down: pad.is_currently_pressed(Button::DPadDown) || current.1 == -1,
+                held_left: pad.is_currently_pressed(Button::DPadLeft) || current.0 == -1,
+                held_right: pad.is_currently_pressed(Button::DPadRight) || current.0 == 1,
             }
         }
     }
 
     /// Plays a bounded dual-rumble pulse on the first connected controller.
     /// Browser support depends on the Gamepad vibration actuator; unsupported
-    /// devices and native no-backend builds safely ignore the request.
+    /// devices safely ignore the request.
     pub fn rumble(&mut self, duration_ms: u32, strong: f32, weak: f32) {
-        #[cfg(target_arch = "wasm32")]
+        #[cfg(not(target_os = "android"))]
         if let Some(id) = self.inner.all().next().map(|pad| pad.id()) {
             self.inner.rumble(
                 id,
@@ -219,9 +212,28 @@ impl GamepadInput {
                 weak.clamp(0.0, 1.0),
             );
         }
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(target_os = "android")]
         let _ = (duration_ms, strong, weak);
     }
+}
+
+fn stick_direction((x, y): (f32, f32)) -> (i8, i8) {
+    (
+        if x < -0.55 {
+            -1
+        } else if x > 0.55 {
+            1
+        } else {
+            0
+        },
+        if y < -0.55 {
+            -1
+        } else if y > 0.55 {
+            1
+        } else {
+            0
+        },
+    )
 }
 
 impl InputState {

@@ -74,14 +74,18 @@ fn semantic_gamepad_frame_defaults_to_disconnected_and_idle() {
             down: false,
             left: false,
             right: false,
+            held_up: false,
+            held_down: false,
+            held_left: false,
+            held_right: false,
         }
     );
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn native_gamepad_poller_is_a_safe_no_op() {
-    let mut input = GamepadInput::new();
-    assert_eq!(input.capture(), GamepadFrame::default());
-    input.rumble(120, 0.5, 0.8);
+fn stick_direction_uses_deadzone_and_expected_axes() {
+    assert_eq!(stick_direction((0.0, 0.0)), (0, 0));
+    assert_eq!(stick_direction((-0.54, 0.55)), (0, 0));
+    assert_eq!(stick_direction((-0.56, 0.56)), (-1, 1));
+    assert_eq!(stick_direction((0.9, -0.8)), (1, -1));
 }
