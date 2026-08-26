@@ -8,6 +8,7 @@ edition = "2021"
 default = []
 db = ["dep:sqlx", "dep:async-std"]
 net = ["dep:quad-net"]
+analytics = ["net"]
 
 [dependencies]
 macroquad = "0.4"

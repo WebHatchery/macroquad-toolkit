@@ -39,6 +39,7 @@
 //! - [`assets`] - Asset management and texture loading
 //! - [`raster`] - CPU-side pixel drawing onto images for procedural art
 //! - [`net`] - Optional non-blocking JSON HTTP client for authoritative servers
+//! - [`analytics`] - Optional anonymous, batched WebHatchery game telemetry client
 //!
 //! ## Other
 //! - [`audio`] - Audio playback utilities
@@ -49,6 +50,8 @@
 
 // Core 2D modules (existing)
 pub mod achievements;
+#[cfg(feature = "analytics")]
+pub mod analytics;
 pub mod artwork;
 pub mod assets;
 pub mod audio;
@@ -154,4 +157,10 @@ pub mod prelude_data {
 #[cfg(feature = "net")]
 pub mod prelude_net {
     pub use crate::net::{HttpClient, HttpMethod, Pending};
+}
+
+/// Re-exports for games that enable the optional `analytics` feature.
+#[cfg(feature = "analytics")]
+pub mod prelude_analytics {
+    pub use crate::analytics::{AnalyticsClient, AnalyticsConfig, AnalyticsEventName};
 }

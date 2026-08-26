@@ -342,6 +342,23 @@ Use database crates only for native/server code. Keep WebGL clients on JSON data
 
 ---
 
+## Anonymous game analytics
+
+Enable the toolkit's `analytics` feature when a game reports to Hatchery Signals:
+
+```toml
+macroquad-toolkit = { path = "../macroquad-toolkit", features = ["analytics"] }
+```
+
+Create one `AnalyticsClient`, call `update(dt, is_active)` every frame, and report
+only sparse named milestones plus the dedicated demo, store-click, and completion
+events. The shared client owns persistent anonymous IDs, per-launch sessions,
+active-time heartbeats, batching, timeouts, and retry behavior. Telemetry failure
+must never interrupt gameplay.
+
+Follow `../ANALYTICS_INTEGRATION.md` for the complete event, privacy, active-time,
+release, and game configuration requirements.
+
 ## Deployment
 
 ### Required Files

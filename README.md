@@ -24,6 +24,8 @@ A collection of common utilities for Macroquad game development, extracted from 
 - **Sprite system**: Builder pattern for texture rendering with transformations
 - **Bounded text layout**: Helpers for measuring, wrapping, fitting, truncating, and drawing text inside UI boxes
 - **Optional networking**: Frame-polled JSON HTTP for native and WASM clients
+- **Optional game analytics**: Anonymous IDs, active-time heartbeats, milestones,
+  batching, and retry delivery to Hatchery Signals (enables `net`)
 
 ## Usage
 
@@ -38,6 +40,12 @@ Client/server games should opt into the transport feature:
 
 ```toml
 macroquad-toolkit = { path = "../macroquad-toolkit", features = ["net"] }
+```
+
+For shared WebHatchery gameplay analytics:
+
+```toml
+macroquad-toolkit = { path = "../macroquad-toolkit", features = ["analytics"] }
 ```
 
 ### Quick Start
