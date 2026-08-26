@@ -29,6 +29,9 @@ param(
     [int]$WindowWidth = 0,
     [int]$WindowHeight = 0,
     [string]$OutputDir = "docs\verification",
+    # Optional JSON report describing the captured process and its lifetime
+    # peak working set. Relative paths resolve from GameDir.
+    [string]$ProcessReportPath,
     [int]$MinBytes = 40000,
     [switch]$SkipBuild,
     [switch]$Release,
@@ -105,19 +108,56 @@ try {
         if (-not $Visible) { $startArgs.WindowStyle = "Hidden" }
         $proc = Start-Process @startArgs
         Write-Host ("Capturing {0} scenes in one process (PID {1})..." -f $captures.Count, $proc.Id)
-        if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
-            $proc.Kill()
-            throw ("Capture batch did not exit within $TimeoutSeconds s. " +
-                "Most likely the env-var prefix is wrong: this run used " +
-                "'$Prefix', derived from the package name. Check what the " +
-                "game passes to CaptureConfig::all_from_env and pass -Prefix to match.")
+        $maxSampledWorkingSetBytes = [int64]0
+        $osPeakWorkingSetBytes = [int64]0
+        $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
+        while (-not $proc.HasExited) {
+            $proc.Refresh()
+            $maxSampledWorkingSetBytes = [Math]::Max(
+                $maxSampledWorkingSetBytes,
+                [int64]$proc.WorkingSet64
+            )
+            $osPeakWorkingSetBytes = [Math]::Max(
+                $osPeakWorkingSetBytes,
+                [int64]$proc.PeakWorkingSet64
+            )
+            if ([DateTime]::UtcNow -ge $deadline) {
+                $proc.Kill()
+                throw ("Capture batch did not exit within $TimeoutSeconds s. " +
+                    "Most likely the env-var prefix is wrong: this run used " +
+                    "'$Prefix', derived from the package name. Check what the " +
+                    "game passes to CaptureConfig::all_from_env and pass -Prefix to match.")
+            }
+            Start-Sleep -Milliseconds 25
         }
+        $proc.WaitForExit()
         if ($proc.ExitCode -ne 0) {
             $details = @(
                 if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Tail 40 }
                 if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath -Tail 40 }
             ) -join "`n"
             throw "Capture process exited with code $($proc.ExitCode).`n$details"
+        }
+        if ($ProcessReportPath) {
+            $resolvedReportPath = if ([IO.Path]::IsPathRooted($ProcessReportPath)) {
+                [IO.Path]::GetFullPath($ProcessReportPath)
+            } else {
+                [IO.Path]::GetFullPath((Join-Path $GameDir $ProcessReportPath))
+            }
+            $reportParent = Split-Path -Parent $resolvedReportPath
+            if ($reportParent) {
+                New-Item -ItemType Directory -Path $reportParent -Force | Out-Null
+            }
+            [pscustomobject]@{
+                executable = [IO.Path]::GetFullPath($exe)
+                scenes = $captures.Count
+                frames_per_scene = $Frames
+                requested_width = $WindowWidth
+                requested_height = $WindowHeight
+                fullscreen = [bool]$Fullscreen
+                max_sampled_working_set_bytes = $maxSampledWorkingSetBytes
+                os_peak_working_set_bytes = $osPeakWorkingSetBytes
+            } | ConvertTo-Json -Compress | Set-Content -LiteralPath $resolvedReportPath -Encoding utf8
         }
     }
     finally {
