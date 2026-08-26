@@ -141,6 +141,23 @@ pub fn save_to_slot_with_version<T: Serialize>(
     }
 }
 
+/// Preserve the current slot, then replace it with a versioned save.
+///
+/// The write is aborted if an existing slot cannot be backed up. This keeps a
+/// failed backup from silently turning the next successful write into the only
+/// remaining copy of the player's progress.
+pub fn save_to_slot_with_version_and_backup<T: Serialize>(
+    game_name: &str,
+    slot_name: &str,
+    data: &T,
+    version: &str,
+) -> Result<(), String> {
+    if slot_exists(game_name, slot_name) {
+        backup_slot(game_name, slot_name)?;
+    }
+    save_to_slot_with_version(game_name, slot_name, data, version)
+}
+
 /// Load game data from a named slot (cross-platform)
 pub fn load_from_slot<T: DeserializeOwned>(game_name: &str, slot_name: &str) -> Result<T, String> {
     #[cfg(not(target_arch = "wasm32"))]
@@ -185,6 +202,76 @@ pub fn slot_exists(game_name: &str, slot_name: &str) -> bool {
             false
         }
     }
+}
+
+/// Return whether the conventional previous-good copy exists for a slot.
+pub fn slot_backup_exists(game_name: &str, slot_name: &str) -> bool {
+    slot_exists(game_name, &format!("{slot_name}_backup"))
+}
+
+/// Copy a slot's exact stored bytes into its conventional backup slot.
+pub fn backup_slot(game_name: &str, slot_name: &str) -> Result<String, String> {
+    let backup_name = format!("{slot_name}_backup");
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let content = storage_read(game_name, slot_name)
+            .ok_or_else(|| format!("No save found for slot: {slot_name}"))?;
+        crate::wasm_storage::storage_set(&storage_key(game_name, &backup_name), &content);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let source = get_app_data_path(game_name, &format!("save_{slot_name}.json"))
+            .ok_or_else(|| "Could not determine save path".to_string())?;
+        let backup = get_app_data_path(game_name, &format!("save_{backup_name}.json"))
+            .ok_or_else(|| "Could not determine backup path".to_string())?;
+        let content =
+            fs::read_to_string(&source).map_err(|error| format!("Backup read error: {error}"))?;
+        save_string_atomic(&backup, &content)?;
+    }
+
+    Ok(backup_name)
+}
+
+/// Restore a slot from its conventional backup without discarding the current bytes.
+///
+/// If the primary slot exists, it is first preserved as `{slot}_before_restore`.
+/// Returns that displaced slot name, or `None` when there was no primary slot.
+pub fn restore_slot_backup(game_name: &str, slot_name: &str) -> Result<Option<String>, String> {
+    let backup_name = format!("{slot_name}_backup");
+    let displaced_name = format!("{slot_name}_before_restore");
+    let had_primary = slot_exists(game_name, slot_name);
+
+    #[cfg(target_arch = "wasm32")]
+    {
+        let backup = storage_read(game_name, &backup_name)
+            .ok_or_else(|| format!("No backup found for slot: {slot_name}"))?;
+        if let Some(current) = storage_read(game_name, slot_name) {
+            crate::wasm_storage::storage_set(&storage_key(game_name, &displaced_name), &current);
+        }
+        crate::wasm_storage::storage_set(&storage_key(game_name, slot_name), &backup);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let primary = get_app_data_path(game_name, &format!("save_{slot_name}.json"))
+            .ok_or_else(|| "Could not determine save path".to_string())?;
+        let backup = get_app_data_path(game_name, &format!("save_{backup_name}.json"))
+            .ok_or_else(|| "Could not determine backup path".to_string())?;
+        let backup_content =
+            fs::read_to_string(&backup).map_err(|error| format!("Backup read error: {error}"))?;
+        if primary.exists() {
+            let current = fs::read_to_string(&primary)
+                .map_err(|error| format!("Current save read error: {error}"))?;
+            let displaced = get_app_data_path(game_name, &format!("save_{displaced_name}.json"))
+                .ok_or_else(|| "Could not determine displaced-save path".to_string())?;
+            save_string_atomic(&displaced, &current)?;
+        }
+        save_string_atomic(&primary, &backup_content)?;
+    }
+
+    Ok(had_primary.then_some(displaced_name))
 }
 
 /// Delete a save slot
@@ -355,6 +442,9 @@ pub fn get_save_slots(game_name: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod storage_key_tests;
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod backup_tests;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod quarantine_tests {
