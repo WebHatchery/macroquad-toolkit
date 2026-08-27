@@ -367,6 +367,11 @@ if let Some(path) = get_app_data_path("my_game", "save.json") {
 }
 ```
 
+For a production key path that needs isolated native restart tests, use
+`save_json_key_configured`, `load_json_key_configured`, and `json_key_exists_configured`. Their
+optional environment-variable argument supplies the complete native test path; browser builds keep
+using the normal qualified storage key.
+
 ### Audio (`audio` module)
 
 ```rust

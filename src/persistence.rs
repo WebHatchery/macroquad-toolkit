@@ -55,7 +55,8 @@ pub use files::{
 #[cfg(not(target_arch = "wasm32"))]
 pub use files::{load_json, save_json, save_json_atomic, save_string_atomic};
 pub use keys::{
-    delete_json_key, json_key_exists, load_json_key, load_string_key, save_json_key,
+    delete_json_key, json_key_exists, json_key_exists_configured, load_json_key,
+    load_json_key_configured, load_string_key, save_json_key, save_json_key_configured,
     save_string_key,
 };
 pub use save_root::SaveRoot;
