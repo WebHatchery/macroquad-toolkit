@@ -36,6 +36,11 @@ param(
     # Optional JSON report describing the captured process and its sampled
     # working-set distribution. Relative paths resolve from GameDir.
     [string]$ProcessReportPath,
+    # On Windows, also samples the process-scoped GPU Process Memory and 3D
+    # engine performance counters. Counter availability is reported rather
+    # than assumed; this diagnostic does not impose a GPU threshold.
+    [switch]$SampleWindowsGpuCounters,
+    [int]$GpuSampleIntervalMilliseconds = 500,
     [int]$MinBytes = 40000,
     [switch]$SkipBuild,
     [switch]$Release,
@@ -60,6 +65,53 @@ function Get-NearestRankValue {
     [long]$ordered[[Math]::Max(0, [Math]::Min($index, $ordered.Count - 1))]
 }
 
+function Get-WindowsGpuSample {
+    param([int]$ProcessId)
+
+    if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or
+        $null -eq (Get-Command Get-CimInstance -ErrorAction SilentlyContinue)) {
+        return $null
+    }
+
+    $dedicated = [double]0
+    $shared = [double]0
+    $utilization3d = [double]0
+    $sampleCount = 0
+    try {
+        $memorySamples = @(Get-CimInstance `
+            -ClassName Win32_PerfFormattedData_GPUPerformanceCounters_GPUProcessMemory `
+            -ErrorAction Stop | Where-Object Name -Like "pid_${ProcessId}_*")
+        foreach ($sample in $memorySamples) {
+            $dedicated += [double]$sample.DedicatedUsage
+            $shared += [double]$sample.SharedUsage
+            $sampleCount++
+        }
+    } catch {
+        # A process may not have a GPU counter instance until its first presented frame.
+    }
+    try {
+        $engineSamples = @(Get-CimInstance `
+            -ClassName Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine `
+            -ErrorAction Stop | Where-Object Name -Like "pid_${ProcessId}_*_engtype_3D")
+        foreach ($sample in $engineSamples) {
+            $value = [double]$sample.UtilizationPercentage
+            if (-not [double]::IsNaN($value) -and -not [double]::IsInfinity($value) -and $value -ge 0) {
+                $utilization3d += $value
+                $sampleCount++
+            }
+        }
+    } catch {
+        # Some adapters or drivers expose memory accounting but no 3D engine instance.
+    }
+    if ($sampleCount -eq 0) { return $null }
+
+    [pscustomobject]@{
+        dedicated_bytes = [long][Math]::Round($dedicated)
+        shared_bytes = [long][Math]::Round($shared)
+        utilization_3d_percent = $utilization3d
+    }
+}
+
 if (-not (Test-Path -LiteralPath (Join-Path $GameDir "Cargo.toml"))) {
     throw "No Cargo.toml in '$GameDir' - run from a game directory or pass -GameDir."
 }
@@ -68,6 +120,9 @@ if ($MinFrameMilliseconds -lt 0 -or $MinFrameMilliseconds -gt 1000) {
 }
 if ($ExecutablePath -and -not $SkipBuild) {
     throw "ExecutablePath requires -SkipBuild so the supplied binary is not replaced or confused with a Cargo build."
+}
+if ($GpuSampleIntervalMilliseconds -lt 100 -or $GpuSampleIntervalMilliseconds -gt 5000) {
+    throw "GpuSampleIntervalMilliseconds must be between 100 and 5000."
 }
 
 Push-Location $GameDir
@@ -130,6 +185,22 @@ try {
     $stdoutPath = Join-Path $outDir (".capture_stdout_{0}.log" -f $PID)
     $stderrPath = Join-Path $outDir (".capture_stderr_{0}.log" -f $PID)
     try {
+        if ($SampleWindowsGpuCounters -and
+            [Environment]::OSVersion.Platform -eq [PlatformID]::Win32NT -and
+            $null -ne (Get-Command Get-CimInstance -ErrorAction SilentlyContinue)) {
+            # Initialize the formatted-performance provider before process timing starts. The first
+            # provider access can take seconds; later per-process reads take milliseconds.
+            try {
+                Get-CimInstance `
+                    -ClassName Win32_PerfFormattedData_GPUPerformanceCounters_GPUProcessMemory `
+                    -ErrorAction Stop | Out-Null
+                Get-CimInstance `
+                    -ClassName Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine `
+                    -ErrorAction Stop | Out-Null
+            } catch {
+                # The report will record unavailable when the provider or driver exposes no samples.
+            }
+        }
         $startArgs = @{
             FilePath = $exe
             PassThru = $true
@@ -141,6 +212,10 @@ try {
         $wallClock = [Diagnostics.Stopwatch]::StartNew()
         Write-Host ("Capturing {0} scenes in one process (PID {1})..." -f $captures.Count, $proc.Id)
         $workingSetSamples = [Collections.Generic.List[long]]::new()
+        $gpuDedicatedSamples = [Collections.Generic.List[long]]::new()
+        $gpuSharedSamples = [Collections.Generic.List[long]]::new()
+        $gpu3dSamples = [Collections.Generic.List[double]]::new()
+        $lastGpuSampleUtc = [DateTime]::MinValue
         $maxSampledWorkingSetBytes = [int64]0
         $osPeakWorkingSetBytes = [int64]0
         $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
@@ -157,6 +232,17 @@ try {
                 $osPeakWorkingSetBytes,
                 [int64]$proc.PeakWorkingSet64
             )
+            $nowUtc = [DateTime]::UtcNow
+            if ($SampleWindowsGpuCounters -and
+                ($nowUtc - $lastGpuSampleUtc).TotalMilliseconds -ge $GpuSampleIntervalMilliseconds) {
+                $gpuSample = Get-WindowsGpuSample $proc.Id
+                $lastGpuSampleUtc = $nowUtc
+                if ($null -ne $gpuSample) {
+                    $gpuDedicatedSamples.Add([long]$gpuSample.dedicated_bytes)
+                    $gpuSharedSamples.Add([long]$gpuSample.shared_bytes)
+                    $gpu3dSamples.Add([double]$gpuSample.utilization_3d_percent)
+                }
+            }
             if ([DateTime]::UtcNow -ge $deadline) {
                 $proc.Kill()
                 throw ("Capture batch did not exit within $TimeoutSeconds s. " +
@@ -183,6 +269,12 @@ try {
             $finalSampledWorkingSetBytes = if ($workingSetValues.Count -gt 0) {
                 $workingSetValues[$workingSetValues.Count - 1]
             } else { [long]0 }
+            $gpuDedicatedValues = [long[]]$gpuDedicatedSamples.ToArray()
+            $gpuSharedValues = [long[]]$gpuSharedSamples.ToArray()
+            $gpu3dValues = [double[]]$gpu3dSamples.ToArray()
+            $gpuCounterStatus = if (-not $SampleWindowsGpuCounters) { "not_requested" }
+            elseif ($gpuDedicatedValues.Count -gt 0) { "sampled" }
+            else { "unavailable" }
             $resolvedReportPath = if ([IO.Path]::IsPathRooted($ProcessReportPath)) {
                 [IO.Path]::GetFullPath($ProcessReportPath)
             } else {
@@ -208,6 +300,20 @@ try {
                 final_sampled_working_set_bytes = $finalSampledWorkingSetBytes
                 max_sampled_working_set_bytes = $maxSampledWorkingSetBytes
                 os_peak_working_set_bytes = $osPeakWorkingSetBytes
+                gpu_counter_status = $gpuCounterStatus
+                gpu_sample_interval_milliseconds = $GpuSampleIntervalMilliseconds
+                gpu_sample_count = $gpuDedicatedValues.Count
+                first_gpu_dedicated_bytes = if ($gpuDedicatedValues.Count) { $gpuDedicatedValues[0] } else { [long]0 }
+                median_gpu_dedicated_bytes = Get-NearestRankValue $gpuDedicatedValues 0.5
+                p95_gpu_dedicated_bytes = Get-NearestRankValue $gpuDedicatedValues 0.95
+                final_gpu_dedicated_bytes = if ($gpuDedicatedValues.Count) { $gpuDedicatedValues[-1] } else { [long]0 }
+                max_gpu_dedicated_bytes = if ($gpuDedicatedValues.Count) { ($gpuDedicatedValues | Measure-Object -Maximum).Maximum } else { [long]0 }
+                first_gpu_shared_bytes = if ($gpuSharedValues.Count) { $gpuSharedValues[0] } else { [long]0 }
+                median_gpu_shared_bytes = Get-NearestRankValue $gpuSharedValues 0.5
+                p95_gpu_shared_bytes = Get-NearestRankValue $gpuSharedValues 0.95
+                final_gpu_shared_bytes = if ($gpuSharedValues.Count) { $gpuSharedValues[-1] } else { [long]0 }
+                max_gpu_shared_bytes = if ($gpuSharedValues.Count) { ($gpuSharedValues | Measure-Object -Maximum).Maximum } else { [long]0 }
+                max_gpu_3d_utilization_percent = if ($gpu3dValues.Count) { ($gpu3dValues | Measure-Object -Maximum).Maximum } else { [double]0 }
             } | ConvertTo-Json -Compress | Set-Content -LiteralPath $resolvedReportPath -Encoding utf8
         }
     }

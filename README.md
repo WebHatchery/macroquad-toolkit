@@ -413,6 +413,11 @@ count plus first, median, p95, and final sampled working sets so callers can dis
 peak from a sustained footprint. Relative report paths resolve from `-GameDir`; ordinary captures
 write no process report unless this option is supplied.
 
+Pass `-SampleWindowsGpuCounters` to additionally sample process-scoped dedicated/shared GPU memory
+and aggregate 3D-engine utilization. The report records `sampled`, `unavailable`, or `not_requested`
+explicitly and imposes no default GPU threshold; performance-counter availability depends on
+Windows, the display driver, and whether the process creates a matching GPU instance.
+
 For a sustained render/device probe, `-MinFrameMilliseconds` enforces a minimum wall-clock frame
 duration without changing the game's deterministic capture timestep. The report records that value
 and total elapsed wall time. `-ExecutablePath <path> -SkipBuild` runs a specific previously built or
