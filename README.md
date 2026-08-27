@@ -413,6 +413,11 @@ count plus first, median, p95, and final sampled working sets so callers can dis
 peak from a sustained footprint. Relative report paths resolve from `-GameDir`; ordinary captures
 write no process report unless this option is supplied.
 
+For a sustained render/device probe, `-MinFrameMilliseconds` enforces a minimum wall-clock frame
+duration without changing the game's deterministic capture timestep. The report records that value
+and total elapsed wall time. `-ExecutablePath <path> -SkipBuild` runs a specific previously built or
+packaged executable while retaining the same scene, image, timing, and memory checks.
+
 ## Button Click Semantics
 
 The toolkit provides two button variants to handle different click behaviors:

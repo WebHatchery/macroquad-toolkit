@@ -24,8 +24,12 @@ param(
     [string]$GameDir = (Get-Location).Path,
     [string]$Prefix,
     [string]$ExeName,
+    # Run an already-built executable instead of the Cargo target. Requires
+    # -SkipBuild; relative paths resolve from GameDir.
+    [string]$ExecutablePath,
     [string[]]$Scenes = @("gameplay"),
     [int]$Frames = 150,
+    [double]$MinFrameMilliseconds = 0,
     [int]$WindowWidth = 0,
     [int]$WindowHeight = 0,
     [string]$OutputDir = "docs\verification",
@@ -59,6 +63,12 @@ function Get-NearestRankValue {
 if (-not (Test-Path -LiteralPath (Join-Path $GameDir "Cargo.toml"))) {
     throw "No Cargo.toml in '$GameDir' - run from a game directory or pass -GameDir."
 }
+if ($MinFrameMilliseconds -lt 0 -or $MinFrameMilliseconds -gt 1000) {
+    throw "MinFrameMilliseconds must be between 0 and 1000."
+}
+if ($ExecutablePath -and -not $SkipBuild) {
+    throw "ExecutablePath requires -SkipBuild so the supplied binary is not replaced or confused with a Cargo build."
+}
 
 Push-Location $GameDir
 try {
@@ -70,7 +80,15 @@ try {
     if (-not $ExeName) { $ExeName = $package.name }
     if (-not $Prefix) { $Prefix = ($package.name -replace "-", "_").ToUpperInvariant() }
     $profileDir = if ($Release) { "release" } else { "debug" }
-    $exe = Join-Path $metadata.target_directory "$profileDir\$ExeName.exe"
+    $exe = if ($ExecutablePath) {
+        if ([IO.Path]::IsPathRooted($ExecutablePath)) {
+            [IO.Path]::GetFullPath($ExecutablePath)
+        } else {
+            [IO.Path]::GetFullPath((Join-Path $GameDir $ExecutablePath))
+        }
+    } else {
+        Join-Path $metadata.target_directory "$profileDir\$ExeName.exe"
+    }
 
     if (-not $SkipBuild) {
         Write-Host "Building $($package.name) ($profileDir)..."
@@ -101,6 +119,10 @@ try {
 
     Set-Item -Path "Env:${Prefix}_CAPTURE_MANIFEST" -Value $manifestPath
     Set-Item -Path "Env:${Prefix}_CAPTURE_FRAMES" -Value "$Frames"
+    $minimumFrameValue = $MinFrameMilliseconds.ToString(
+        "0.###", [Globalization.CultureInfo]::InvariantCulture
+    )
+    Set-Item -Path "Env:${Prefix}_CAPTURE_MIN_FRAME_MS" -Value $minimumFrameValue
     if ($WindowWidth -gt 0) { Set-Item -Path "Env:${Prefix}_WINDOW_WIDTH" -Value "$WindowWidth" }
     if ($WindowHeight -gt 0) { Set-Item -Path "Env:${Prefix}_WINDOW_HEIGHT" -Value "$WindowHeight" }
     Set-Item -Path "Env:${Prefix}_CAPTURE_FULLSCREEN" -Value $(if ($Fullscreen) { "1" } else { "0" })
@@ -116,6 +138,7 @@ try {
         }
         if (-not $Visible) { $startArgs.WindowStyle = "Hidden" }
         $proc = Start-Process @startArgs
+        $wallClock = [Diagnostics.Stopwatch]::StartNew()
         Write-Host ("Capturing {0} scenes in one process (PID {1})..." -f $captures.Count, $proc.Id)
         $workingSetSamples = [Collections.Generic.List[long]]::new()
         $maxSampledWorkingSetBytes = [int64]0
@@ -144,6 +167,7 @@ try {
             Start-Sleep -Milliseconds 25
         }
         $proc.WaitForExit()
+        $wallClock.Stop()
         if ($proc.ExitCode -ne 0) {
             $details = @(
                 if (Test-Path -LiteralPath $stdoutPath) { Get-Content -LiteralPath $stdoutPath -Tail 40 }
@@ -175,6 +199,8 @@ try {
                 requested_width = $WindowWidth
                 requested_height = $WindowHeight
                 fullscreen = [bool]$Fullscreen
+                minimum_frame_milliseconds = $MinFrameMilliseconds
+                elapsed_wall_milliseconds = [long]$wallClock.ElapsedMilliseconds
                 sample_count = $workingSetValues.Count
                 first_sampled_working_set_bytes = $firstSampledWorkingSetBytes
                 median_sampled_working_set_bytes = Get-NearestRankValue $workingSetValues 0.5
@@ -186,7 +212,10 @@ try {
         }
     }
     finally {
-        Remove-Item "Env:${Prefix}_CAPTURE_MANIFEST", "Env:${Prefix}_CAPTURE_FRAMES", "Env:${Prefix}_HEADLESS", "Env:${Prefix}_WINDOW_WIDTH", "Env:${Prefix}_WINDOW_HEIGHT", "Env:${Prefix}_CAPTURE_FULLSCREEN" -ErrorAction SilentlyContinue
+        Remove-Item "Env:${Prefix}_CAPTURE_MANIFEST", "Env:${Prefix}_CAPTURE_FRAMES", `
+            "Env:${Prefix}_CAPTURE_MIN_FRAME_MS", "Env:${Prefix}_HEADLESS", `
+            "Env:${Prefix}_WINDOW_WIDTH", "Env:${Prefix}_WINDOW_HEIGHT", `
+            "Env:${Prefix}_CAPTURE_FULLSCREEN" -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $manifestPath -Force -ErrorAction SilentlyContinue
         if ($proc -and $proc.ExitCode -eq 0) {
             Remove-Item -LiteralPath $stdoutPath, $stderrPath -Force -ErrorAction SilentlyContinue

@@ -9,6 +9,8 @@
 //! Env vars (replace `PREFIX` with your game's prefix, e.g. `CARRIAGE`):
 //! - `PREFIX_CAPTURE_MANIFEST` — tab-separated scene/path rows for a batch
 //! - `PREFIX_CAPTURE_FRAMES` — frames to simulate before capturing (default 150)
+//! - `PREFIX_CAPTURE_MIN_FRAME_MS` — optional minimum wall-clock duration per
+//!   rendered frame; useful for sustained device soaks, zero/unset by default
 //! - `PREFIX_WINDOW_WIDTH` / `PREFIX_WINDOW_HEIGHT` — window size override
 //! - `PREFIX_CAPTURE_FULLSCREEN` — request a borderless fullscreen framebuffer
 //!   (useful when store media needs the monitor's exact pixel dimensions)
@@ -65,6 +67,9 @@ pub struct CaptureConfig {
     /// Fixed timestep per simulated frame. Fixed (not `get_frame_time()`) so
     /// repeated runs are deterministic. Default 1/60.
     pub timestep: f32,
+    /// Optional minimum wall-clock duration per rendered frame. This does not
+    /// change the deterministic simulation timestep.
+    pub minimum_frame_millis: f32,
 }
 
 impl CaptureConfig {
@@ -78,6 +83,8 @@ impl CaptureConfig {
                     panic!("could not read capture manifest {manifest_path}: {error}")
                 });
                 let frames = env_u32(&format!("{prefix}_CAPTURE_FRAMES"), 150).max(1);
+                let minimum_frame_millis =
+                    env_f32(&format!("{prefix}_CAPTURE_MIN_FRAME_MS"), 0.0).max(0.0);
                 let configs = contents
                     .trim_start_matches('\u{feff}')
                     .lines()
@@ -92,6 +99,7 @@ impl CaptureConfig {
                             scene: scene.to_owned(),
                             frames,
                             timestep: 1.0 / 60.0,
+                            minimum_frame_millis,
                         }
                     })
                     .collect::<Vec<_>>();
@@ -166,8 +174,17 @@ pub async fn run_capture_once<F: FnMut(f32)>(config: &CaptureConfig, mut frame: 
 
     let mut rendered = 0;
     loop {
+        #[cfg(not(target_arch = "wasm32"))]
+        let frame_started = std::time::Instant::now();
         frame(config.timestep);
         rendered += 1;
+        #[cfg(not(target_arch = "wasm32"))]
+        if config.minimum_frame_millis > 0.0 {
+            let minimum = std::time::Duration::from_secs_f32(config.minimum_frame_millis / 1_000.0);
+            if let Some(remaining) = minimum.checked_sub(frame_started.elapsed()) {
+                std::thread::sleep(remaining);
+            }
+        }
         // Read the framebuffer after drawing this frame but before presenting
         // it; reading after `next_frame` would return the swapped/cleared
         // buffer (a solid-black PNG).
