@@ -408,8 +408,10 @@ impl GameState<MyGame> for MenuState {
 `scripts/capture_ui.ps1` can run a game's complete deterministic scene manifest in one process.
 Pass `-ProcessReportPath <path>` to write a compact JSON record after the process exits. The report
 includes the executable path, scene/frame counts, requested surface, fullscreen mode, the largest
-working set sampled every 25 ms, and Windows' lifetime peak working set. Relative report paths
-resolve from `-GameDir`; ordinary captures write no process report unless this option is supplied.
+working set sampled every 25 ms, and Windows' lifetime peak working set. It also records the sample
+count plus first, median, p95, and final sampled working sets so callers can distinguish a brief
+peak from a sustained footprint. Relative report paths resolve from `-GameDir`; ordinary captures
+write no process report unless this option is supplied.
 
 ## Button Click Semantics
 

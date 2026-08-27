@@ -29,8 +29,8 @@ param(
     [int]$WindowWidth = 0,
     [int]$WindowHeight = 0,
     [string]$OutputDir = "docs\verification",
-    # Optional JSON report describing the captured process and its lifetime
-    # peak working set. Relative paths resolve from GameDir.
+    # Optional JSON report describing the captured process and its sampled
+    # working-set distribution. Relative paths resolve from GameDir.
     [string]$ProcessReportPath,
     [int]$MinBytes = 40000,
     [switch]$SkipBuild,
@@ -46,6 +46,15 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
+
+function Get-NearestRankValue {
+    param([long[]]$Values, [double]$Percentile)
+
+    if ($Values.Count -eq 0) { return [long]0 }
+    $ordered = @($Values | Sort-Object)
+    $index = [Math]::Ceiling($Percentile * $ordered.Count) - 1
+    [long]$ordered[[Math]::Max(0, [Math]::Min($index, $ordered.Count - 1))]
+}
 
 if (-not (Test-Path -LiteralPath (Join-Path $GameDir "Cargo.toml"))) {
     throw "No Cargo.toml in '$GameDir' - run from a game directory or pass -GameDir."
@@ -108,11 +117,15 @@ try {
         if (-not $Visible) { $startArgs.WindowStyle = "Hidden" }
         $proc = Start-Process @startArgs
         Write-Host ("Capturing {0} scenes in one process (PID {1})..." -f $captures.Count, $proc.Id)
+        $workingSetSamples = [Collections.Generic.List[long]]::new()
         $maxSampledWorkingSetBytes = [int64]0
         $osPeakWorkingSetBytes = [int64]0
         $deadline = [DateTime]::UtcNow.AddSeconds($TimeoutSeconds)
         while (-not $proc.HasExited) {
             $proc.Refresh()
+            if ($proc.WorkingSet64 -gt 0) {
+                $workingSetSamples.Add([int64]$proc.WorkingSet64)
+            }
             $maxSampledWorkingSetBytes = [Math]::Max(
                 $maxSampledWorkingSetBytes,
                 [int64]$proc.WorkingSet64
@@ -139,6 +152,13 @@ try {
             throw "Capture process exited with code $($proc.ExitCode).`n$details"
         }
         if ($ProcessReportPath) {
+            $workingSetValues = [long[]]$workingSetSamples.ToArray()
+            $firstSampledWorkingSetBytes = if ($workingSetValues.Count -gt 0) {
+                $workingSetValues[0]
+            } else { [long]0 }
+            $finalSampledWorkingSetBytes = if ($workingSetValues.Count -gt 0) {
+                $workingSetValues[$workingSetValues.Count - 1]
+            } else { [long]0 }
             $resolvedReportPath = if ([IO.Path]::IsPathRooted($ProcessReportPath)) {
                 [IO.Path]::GetFullPath($ProcessReportPath)
             } else {
@@ -155,6 +175,11 @@ try {
                 requested_width = $WindowWidth
                 requested_height = $WindowHeight
                 fullscreen = [bool]$Fullscreen
+                sample_count = $workingSetValues.Count
+                first_sampled_working_set_bytes = $firstSampledWorkingSetBytes
+                median_sampled_working_set_bytes = Get-NearestRankValue $workingSetValues 0.5
+                p95_sampled_working_set_bytes = Get-NearestRankValue $workingSetValues 0.95
+                final_sampled_working_set_bytes = $finalSampledWorkingSetBytes
                 max_sampled_working_set_bytes = $maxSampledWorkingSetBytes
                 os_peak_working_set_bytes = $osPeakWorkingSetBytes
             } | ConvertTo-Json -Compress | Set-Content -LiteralPath $resolvedReportPath -Encoding utf8
