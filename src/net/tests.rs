@@ -56,6 +56,36 @@ fn malformed_response_names_the_http_endpoint() {
 }
 
 #[test]
+fn api_error_response_preserves_stable_code_and_message() {
+    let error = decode_json::<TestResponse>(
+        "GET /v1/events?since=9",
+        r#"{"meta":{"protocol_version":1},"error":{"code":"cursor_ahead","message":"The requested cursor is ahead."}}"#,
+    )
+    .unwrap_err();
+
+    assert!(error.contains("cursor_ahead"));
+    assert!(error.contains("The requested cursor is ahead."));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn native_status_response_preserves_api_error_code() {
+    let response = ureq::Response::new(
+        409,
+        "Conflict",
+        r#"{"error":{"code":"cursor_ahead","message":"The requested cursor is ahead."}}"#,
+    )
+    .unwrap();
+    let error = format_http_error(
+        "GET /v1/events?since=9",
+        HttpError::UreqError(ureq::Error::Status(409, response)),
+    );
+
+    assert!(error.contains("cursor_ahead"));
+    assert!(error.contains("The requested cursor is ahead."));
+}
+
+#[test]
 fn method_labels_are_stable_for_diagnostics() {
     assert_eq!(HttpMethod::Get.label(), "GET");
     assert_eq!(HttpMethod::Post.label(), "POST");

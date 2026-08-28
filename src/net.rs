@@ -28,8 +28,9 @@
 //! ```
 
 use crate::data_loader::parse_json_labeled;
-use quad_net::http_request::{Method, Request, RequestBuilder};
+use quad_net::http_request::{HttpError, Method, Request, RequestBuilder};
 use serde::{de::DeserializeOwned, Serialize};
+use serde_json::Value;
 use std::marker::PhantomData;
 
 /// HTTP verbs supported by the `quad-net` transport.
@@ -110,7 +111,7 @@ impl<T: DeserializeOwned> Pending<T> {
 
         self.request.as_mut()?.try_recv().map(|result| {
             result
-                .map_err(|error| format!("HTTP request '{}' failed: {error}", self.label))
+                .map_err(|error| format_http_error(&self.label, error))
                 .and_then(|body| decode_json(&self.label, &body))
         })
     }
@@ -141,7 +142,41 @@ impl<T: DeserializeOwned> Pending<T> {
 }
 
 fn decode_json<T: DeserializeOwned>(label: &str, body: &str) -> Result<T, String> {
+    let value: Value = parse_json_labeled(label, body)?;
+    if let Some(error) = value.get("error") {
+        if let Some(message) = api_error_message(label, error) {
+            return Err(message);
+        }
+    }
     parse_json_labeled(label, body)
+}
+
+fn api_error_message(label: &str, error: &Value) -> Option<String> {
+    let code = error.get("code").and_then(Value::as_str)?;
+    let message = error.get("message").and_then(Value::as_str)?;
+    Some(format!("HTTP API error in '{label}' [{code}]: {message}"))
+}
+
+fn format_http_error(label: &str, error: HttpError) -> String {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let HttpError::UreqError(error) = error {
+        return match error {
+            ureq::Error::Status(status, response) => {
+                let body = response.into_string().unwrap_or_default();
+                if let Ok(value) = serde_json::from_str::<Value>(&body) {
+                    if let Some(error) = value.get("error") {
+                        if let Some(message) = api_error_message(label, error) {
+                            return message;
+                        }
+                    }
+                }
+                format!("HTTP request '{label}' returned status code {status}")
+            }
+            error => format!("HTTP request '{label}' failed: {error}"),
+        };
+    }
+
+    format!("HTTP request '{label}' failed: {error}")
 }
 
 /// A configured HTTP client for one game server or gateway.
