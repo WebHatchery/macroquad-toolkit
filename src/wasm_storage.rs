@@ -4,7 +4,7 @@
 use sapp_jsutils::JsObject;
 
 extern "C" {
-    fn storage_set_extern(key: JsObject, value: JsObject);
+    fn storage_set_extern(key: JsObject, value: JsObject) -> bool;
     fn storage_get_extern(key: JsObject) -> JsObject;
     fn storage_remove_extern(key: JsObject);
     fn storage_exists_extern(key: JsObject) -> bool;
@@ -17,10 +17,14 @@ pub extern "C" fn storage_crate_version() -> u32 {
     1
 }
 
-pub fn storage_set(key: &str, value: &str) {
+pub fn storage_set(key: &str, value: &str) -> Result<(), String> {
     let js_key = JsObject::string(key);
     let js_value = JsObject::string(value);
-    unsafe { storage_set_extern(js_key, js_value) };
+    if unsafe { storage_set_extern(js_key, js_value) } {
+        Ok(())
+    } else {
+        Err("Browser storage rejected the write (it may be full or blocked)".to_owned())
+    }
 }
 
 pub fn storage_get(key: &str) -> Option<String> {

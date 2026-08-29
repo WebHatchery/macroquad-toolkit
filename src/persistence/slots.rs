@@ -129,8 +129,7 @@ pub fn save_to_slot_with_version<T: Serialize>(
 
     #[cfg(target_arch = "wasm32")]
     {
-        crate::wasm_storage::storage_set(&storage_key(game_name, slot_name), &serialized);
-        Ok(())
+        crate::wasm_storage::storage_set(&storage_key(game_name, slot_name), &serialized)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -217,7 +216,7 @@ pub fn backup_slot(game_name: &str, slot_name: &str) -> Result<String, String> {
     {
         let content = storage_read(game_name, slot_name)
             .ok_or_else(|| format!("No save found for slot: {slot_name}"))?;
-        crate::wasm_storage::storage_set(&storage_key(game_name, &backup_name), &content);
+        crate::wasm_storage::storage_set(&storage_key(game_name, &backup_name), &content)?;
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -248,9 +247,9 @@ pub fn restore_slot_backup(game_name: &str, slot_name: &str) -> Result<Option<St
         let backup = storage_read(game_name, &backup_name)
             .ok_or_else(|| format!("No backup found for slot: {slot_name}"))?;
         if let Some(current) = storage_read(game_name, slot_name) {
-            crate::wasm_storage::storage_set(&storage_key(game_name, &displaced_name), &current);
+            crate::wasm_storage::storage_set(&storage_key(game_name, &displaced_name), &current)?;
         }
-        crate::wasm_storage::storage_set(&storage_key(game_name, slot_name), &backup);
+        crate::wasm_storage::storage_set(&storage_key(game_name, slot_name), &backup)?;
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -314,7 +313,7 @@ pub fn quarantine_slot(game_name: &str, slot_name: &str) -> Result<String, Strin
     {
         let content = storage_read(game_name, slot_name)
             .ok_or_else(|| format!("No save found for slot: {}", slot_name))?;
-        crate::wasm_storage::storage_set(&storage_key(game_name, &quarantine_name), &content);
+        crate::wasm_storage::storage_set(&storage_key(game_name, &quarantine_name), &content)?;
         crate::wasm_storage::storage_remove(&storage_key(game_name, slot_name));
         crate::wasm_storage::storage_remove(&legacy_storage_key(slot_name));
         Ok(quarantine_name)

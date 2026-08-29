@@ -39,8 +39,7 @@ fn storage_key(game_name: &str, key: &str) -> String {
 pub fn save_string_key(game_name: &str, key: &str, content: &str) -> Result<(), String> {
     #[cfg(target_arch = "wasm32")]
     {
-        crate::wasm_storage::storage_set(&storage_key(game_name, key), content);
-        Ok(())
+        crate::wasm_storage::storage_set(&storage_key(game_name, key), content)
     }
 
     #[cfg(not(target_arch = "wasm32"))]
