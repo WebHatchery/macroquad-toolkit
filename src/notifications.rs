@@ -343,6 +343,13 @@ impl NotificationManager {
     pub fn draw_with_config(&self, config: &NotificationRenderConfig) {
         draw_notifications(self.get_notifications(), config);
     }
+
+    /// Draw notifications with a screen-space nudge from the configured
+    /// anchor. This is useful when a host page reserves a browser overlay or
+    /// another HUD element near an otherwise suitable screen edge.
+    pub fn draw_with_config_and_offset(&self, config: &NotificationRenderConfig, offset: Vec2) {
+        draw_notifications_with_offset(self.get_notifications(), config, offset);
+    }
 }
 
 impl Default for NotificationManager {
@@ -353,27 +360,53 @@ impl Default for NotificationManager {
 
 /// Draw a stack of notification toasts.
 pub fn draw_notifications(notifications: &[Notification], config: &NotificationRenderConfig) {
-    let total_height = notifications.len() as f32 * config.row_height
-        + notifications.len().saturating_sub(1) as f32 * config.spacing;
+    draw_notifications_with_offset(notifications, config, Vec2::ZERO);
+}
 
+/// Draw a notification stack with a screen-space offset from its anchor.
+///
+/// The regular anchor remains the right default for existing games. An
+/// offset lets a game keep that stacking behavior while avoiding page chrome
+/// such as an embedded support or report widget.
+pub fn draw_notifications_with_offset(
+    notifications: &[Notification],
+    config: &NotificationRenderConfig,
+    offset: Vec2,
+) {
+    let origin = notification_origin(
+        config,
+        notifications.len(),
+        vec2(screen_width(), screen_height()),
+        offset,
+    );
+
+    for (index, notification) in notifications.iter().enumerate() {
+        let y = origin.y + index as f32 * (config.row_height + config.spacing);
+        draw_notification(notification, origin.x, y, config);
+    }
+}
+
+fn notification_origin(
+    config: &NotificationRenderConfig,
+    count: usize,
+    viewport: Vec2,
+    offset: Vec2,
+) -> Vec2 {
+    let total_height =
+        count as f32 * config.row_height + count.saturating_sub(1) as f32 * config.spacing;
     let x = match config.anchor {
         NotificationAnchor::TopLeft | NotificationAnchor::BottomLeft => config.margin,
         NotificationAnchor::TopRight | NotificationAnchor::BottomRight => {
-            screen_width() - config.margin - config.width
+            viewport.x - config.margin - config.width
         }
     };
-
-    let start_y = match config.anchor {
+    let y = match config.anchor {
         NotificationAnchor::TopLeft | NotificationAnchor::TopRight => config.margin,
         NotificationAnchor::BottomLeft | NotificationAnchor::BottomRight => {
-            screen_height() - config.margin - total_height
+            viewport.y - config.margin - total_height
         }
     };
-
-    for (index, notification) in notifications.iter().enumerate() {
-        let y = start_y + index as f32 * (config.row_height + config.spacing);
-        draw_notification(notification, x, y, config);
-    }
+    vec2(x, y) + offset
 }
 
 /// Draw one notification toast.

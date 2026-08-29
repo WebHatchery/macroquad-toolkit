@@ -87,3 +87,17 @@ fn test_max_notifications() {
     // Should have Test 2, 3, 4 (oldest removed)
     assert_eq!(manager.get_notifications()[0].message, "Test 2");
 }
+
+#[test]
+fn anchored_stack_offset_moves_the_whole_stack() {
+    let config = NotificationRenderConfig {
+        anchor: NotificationAnchor::BottomRight,
+        ..Default::default()
+    };
+    let total_height = config.row_height * 2.0 + config.spacing;
+    let base = notification_origin(&config, 2, vec2(1280.0, 720.0), Vec2::ZERO);
+    let shifted = notification_origin(&config, 2, vec2(1280.0, 720.0), vec2(-180.0, -82.0));
+
+    assert_eq!(base, vec2(904.0, 720.0 - 16.0 - total_height));
+    assert_eq!(shifted, base + vec2(-180.0, -82.0));
+}
