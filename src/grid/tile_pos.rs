@@ -15,9 +15,12 @@ impl TilePos {
         Self { x, y }
     }
 
-    /// Calculate Manhattan distance to another position
+    /// Calculate Manhattan distance to another position, saturating at `i32::MAX`.
     pub fn manhattan_distance(&self, other: &TilePos) -> i32 {
-        (self.x - other.x).abs() + (self.y - other.y).abs()
+        self.x
+            .abs_diff(other.x)
+            .saturating_add(self.y.abs_diff(other.y))
+            .min(i32::MAX as u32) as i32
     }
 
     /// Calculate Euclidean distance to another position

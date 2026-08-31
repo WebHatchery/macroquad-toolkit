@@ -12,6 +12,14 @@ fn test_tile_pos() {
 }
 
 #[test]
+fn test_manhattan_distance_saturates_extreme_coordinates() {
+    let minimum = TilePos::new(i32::MIN, i32::MIN);
+    let maximum = TilePos::new(i32::MAX, i32::MAX);
+
+    assert_eq!(minimum.manhattan_distance(&maximum), i32::MAX);
+}
+
+#[test]
 fn test_grid_basic() {
     let mut grid: Grid<i32> = Grid::new(10, 10, 0);
 
