@@ -272,6 +272,8 @@ pub fn set_ui_text_scale_for_screen(
 mod text;
 
 pub use text::*;
+mod literal;
+pub use literal::*;
 
 /// Wrap text using the shared default UI font.
 pub fn wrap_text(text: &str, max_width: f32, font_size: f32) -> Vec<String> {
