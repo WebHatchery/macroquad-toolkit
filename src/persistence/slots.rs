@@ -5,6 +5,8 @@ use super::files::{get_app_data_path, save_string_atomic};
 use super::version::{peek_version_from_str, peek_version_value};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
+mod raw;
+pub use raw::{decode_slot_with_migration, encode_slot, SlotSaveStore};
 #[cfg(not(target_arch = "wasm32"))]
 use std::fs;
 
@@ -119,10 +121,7 @@ pub fn save_to_slot_with_version<T: Serialize>(
     data: &T,
     version: &str,
 ) -> Result<(), String> {
-    let slot = SaveSlot::new(slot_name, version);
-    let wrapper = SaveWrapper { slot, data };
-    let serialized =
-        serde_json::to_string(&wrapper).map_err(|e| format!("Serialization error: {}", e))?;
+    let serialized = encode_slot(slot_name, data, version)?;
 
     #[cfg(not(target_arch = "wasm32"))]
     let key = format!("save_{}", slot_name);
@@ -384,16 +383,7 @@ where
         }
     };
 
-    let value: Value =
-        serde_json::from_str(&content).map_err(|e| format!("JSON parse error: {}", e))?;
-    let version = peek_version_value(&value);
-    if version.as_deref() == Some(current_version) {
-        let wrapper: LoadWrapper<T> =
-            serde_json::from_value(value).map_err(|e| format!("Deserialization error: {}", e))?;
-        Ok(wrapper.data)
-    } else {
-        migrate(version, value)
-    }
+    decode_slot_with_migration(&content, current_version, migrate)
 }
 
 /// Get list of save slots.
