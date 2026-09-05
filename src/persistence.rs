@@ -50,6 +50,8 @@ mod slots;
 mod version;
 
 pub use autosave::AutoSaveManager;
+#[cfg(not(target_arch = "wasm32"))]
+pub use backups::FileSaveStore;
 pub use backups::{BackupChain, KeySaveStore, RawSaveStore, RecoveredSave, SaveIssue, SaveSource};
 pub use files::{
     file_exists, get_app_data_path, get_configured_save_path, get_nested_data_path,
@@ -62,7 +64,10 @@ pub use keys::{
     load_json_key_configured, load_string_key, save_json_key, save_json_key_configured,
     save_string_key,
 };
-pub use legacy::{load_json_key_with_legacy, load_with_legacy_keys, LegacyImport, LegacySource};
+pub use legacy::{
+    load_json_key_with_legacy, load_string_key_with_legacy, load_with_legacy_keys, LegacyImport,
+    LegacySource,
+};
 pub use save_root::SaveRoot;
 pub use slots::{
     backup_slot, decode_slot_with_migration, delete_slot, encode_slot, get_save_slots,

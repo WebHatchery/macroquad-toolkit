@@ -1,4 +1,8 @@
 //! Raw backup rotation. Game schemas and migration decisions remain with the caller.
+#[cfg(not(target_arch = "wasm32"))]
+mod file_store;
+#[cfg(not(target_arch = "wasm32"))]
+pub use file_store::FileSaveStore;
 
 /// Storage for raw saves. `None` means absent, never a read failure.
 /// Writes must replace one key atomically or leave it unchanged on failure.

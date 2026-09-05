@@ -89,6 +89,16 @@ pub fn load_json_key_with_legacy<T: DeserializeOwned>(
         validate(&value)?;
         Ok(value)
     };
+    load_string_key_with_legacy(game_name, key, legacy_keys, decode)
+}
+
+/// Import exact legacy bytes using caller-owned schema validation and decoding.
+pub fn load_string_key_with_legacy<T>(
+    game_name: &str,
+    key: &str,
+    legacy_keys: &[&str],
+    decode: impl Fn(&str) -> Result<T, String>,
+) -> Result<LegacyImport<T>, String> {
     #[cfg(target_arch = "wasm32")]
     {
         let primary = super::keys::storage_key(game_name, key);
