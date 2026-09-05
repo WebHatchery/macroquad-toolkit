@@ -31,7 +31,7 @@ pub(super) fn key_file_name(key: &str) -> String {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn storage_key(game_name: &str, key: &str) -> String {
+pub(super) fn storage_key(game_name: &str, key: &str) -> String {
     format!("{}_{}", sanitize_key(game_name), sanitize_key(key))
 }
 

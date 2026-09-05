@@ -393,6 +393,19 @@ Quarantine or otherwise explicitly resolve an invalid primary before saving over
 it. Native read failures remain errors, distinct from absent files; the browser
 adapter inherits the existing bridge's missing/read-unavailable behavior.
 
+### Legacy browser keys (`persistence` module)
+
+`load_json_key_with_legacy(game, key, &["old_raw_key"], validate)` reads the
+normal qualified key first. Only when it is absent on WASM does it try the
+explicit raw-key allowlist. Both primary and historical JSON must pass the
+game's schema/version validator. A present corrupt/future primary blocks import;
+it is never silently replaced by old progress. Imported bytes and historical
+keys are preserved, and failed writes return an error. Native builds use the
+ordinary key file and ignore browser aliases. `LegacySource` identifies imports.
+
+`load_with_legacy_keys` provides the same policy over `RawSaveStore` for tests
+or custom backends, with exact backend keys. No key discovery or deletion occurs.
+
 ### Audio (`audio` module)
 
 ```rust

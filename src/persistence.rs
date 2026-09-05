@@ -44,6 +44,7 @@ mod autosave;
 mod backups;
 mod files;
 mod keys;
+mod legacy;
 mod save_root;
 mod slots;
 mod version;
@@ -61,6 +62,7 @@ pub use keys::{
     load_json_key_configured, load_string_key, save_json_key, save_json_key_configured,
     save_string_key,
 };
+pub use legacy::{load_json_key_with_legacy, load_with_legacy_keys, LegacyImport, LegacySource};
 pub use save_root::SaveRoot;
 pub use slots::{
     backup_slot, delete_slot, get_save_slots, load_from_slot, load_from_slot_with_migration,
