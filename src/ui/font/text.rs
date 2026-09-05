@@ -94,6 +94,15 @@ pub fn truncate_text_to_width(text: &str, max_width: f32, font_size: f32) -> Str
     truncate_text_to_width_ex(text, max_width, None, font_size)
 }
 
+/// Fit one line using the same font policy and size as its drawing style.
+pub fn truncate_text_to_width_with_style(
+    text: &str,
+    max_width: f32,
+    style: TextStyle<'_>,
+) -> String {
+    truncate_text_to_width_with_font(text, max_width, style.resolved_font(), style.font_size)
+}
+
 pub fn truncate_text_to_width_ex(
     text: &str,
     max_width: f32,
