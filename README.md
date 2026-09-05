@@ -350,6 +350,17 @@ let value = rng.gen_range(1..100);
 let choice = rng.choose(&["a", "b", "c"]);
 ```
 
+### Legacy seeded streams (`rng` module)
+
+`LegacyLcg64<INCREMENT>` shares the historical multiply/add/upper-32-bit
+generator used by Final Landing (`INCREMENT = 1`) and Hatchspire
+(`INCREMENT = 1_442_695_040_888_963_407`). Both game adapters now use it while
+retaining their original range and chance behavior. Fixed pre-migration vectors
+cover zero, ordinary and maximum seeds. `new(0)` retains the old seed-to-one
+rule; `from_state(0)` restores zero exactly. The increment is part of the saved
+algorithm contract and must not change between save and restore. Use
+`SeededRng` for new streams; this API exists for compatibility.
+
 ### Sprite (`sprite` module)
 
 ```rust

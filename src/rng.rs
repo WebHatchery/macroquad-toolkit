@@ -6,6 +6,9 @@
 use macroquad::rand;
 use serde::{Deserialize, Serialize};
 
+mod legacy;
+pub use legacy::LegacyLcg64;
+
 /// Small deterministic RNG for reproducible generation.
 ///
 /// Serializable so games can save mid-run RNG state and keep replays and
