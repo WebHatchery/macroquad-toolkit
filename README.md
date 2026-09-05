@@ -244,6 +244,22 @@ let world_pos = camera.screen_to_world(mouse_position().into());
 let screen_pos = camera.world_to_screen(world_pos);
 ```
 
+### Viewport camera transforms (`camera` module)
+
+`CameraTransform::new(target, zoom)` creates a pure logical-pixel transform.
+Pass an explicit `Rect` viewport to `screen_to_world`, `world_to_screen`, and
+`zoom_at`; no Macroquad window or input polling is needed. Coordinates include
+the viewport's panel offset. `pan_screen` follows a drag, while `zoom_at` keeps
+the anchor's world point fixed even at zoom limits. Invalid inputs are rejected.
+
+`constrain` accepts `CameraBoundsPolicy::TargetInside` or `KeepVisible { pixels }`.
+Apply constraints after movement; bounds may intentionally move the zoom anchor.
+`apply_gesture` consumes claimed frames from the existing `TouchGesture`
+recognizer, leaving taps to game controls. Games retain routing, projection,
+selection and saved schemas. `Camera2D::transform` and `set_transform` bridge
+the pure transform to the existing interactive camera; set explicit policies on
+the transform before applying it.
+
 ### Events (`events` module)
 
 ```rust

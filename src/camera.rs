@@ -2,6 +2,9 @@
 
 use macroquad::prelude::*;
 
+mod transform;
+pub use transform::{CameraBoundsPolicy, CameraTransform};
+
 /// Optional camera bounds in world space.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct CameraBounds {
@@ -93,6 +96,19 @@ pub struct Camera2D {
 }
 
 impl Camera2D {
+    /// Snapshot the camera for pure viewport-relative calculations without polling input.
+    pub fn transform(&self) -> Result<CameraTransform, String> {
+        CameraTransform::new(self.target, self.zoom)
+    }
+
+    /// Apply a pure transform while retaining this camera's input configuration.
+    /// Bounds/zoom policies should be applied explicitly to the transform first.
+    pub fn set_transform(&mut self, transform: CameraTransform) {
+        self.target = transform.target();
+        self.zoom = transform.zoom();
+        self.cancel_drag();
+    }
+
     /// Create a new camera with the given target position and zoom level
     pub fn new(target: Vec2, zoom: f32) -> Self {
         Self {

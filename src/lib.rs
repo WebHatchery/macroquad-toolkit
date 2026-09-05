@@ -121,7 +121,9 @@ pub mod prelude {
 
     // Assets and rendering
     pub use crate::assets::{AssetManager, AssetPack};
-    pub use crate::camera::{Camera2D, Camera2DConfig, CameraBounds};
+    pub use crate::camera::{
+        Camera2D, Camera2DConfig, CameraBounds, CameraBoundsPolicy, CameraTransform,
+    };
     pub use crate::sprite::Sprite;
 
     // Persistence
