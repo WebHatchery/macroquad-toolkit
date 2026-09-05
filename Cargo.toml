@@ -23,10 +23,10 @@ zip = { version = "0.6.6", default-features = false, features = ["deflate"] }
 gamepads = { version = "0.1.7", default-features = false }
 sqlx = { version = "0.7", features = ["runtime-async-std-native-tls", "sqlite"], optional = true }
 async-std = { version = "1.12", optional = true }
-quad-net = { version = "0.1.2", optional = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 sapp-jsutils = "0.1"
+quad-net = { version = "0.1.2", optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ureq = "2.0"

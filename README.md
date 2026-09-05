@@ -29,6 +29,14 @@ A collection of common utilities for Macroquad game development, extracted from 
 
 ## Usage
 
+Runtime JSON overrides with historical fallback behavior can use
+`data_loader::load_json_file_with_fallback` (async native/WASM) or
+`load_json_file_with_fallback_sync` (native). Select `JsonFallbackPolicy::ReadError`
+to fall back only when reading fails, or `ReadOrParseError` to also tolerate
+malformed runtime content. Both retain source-labeled errors and reject an
+invalid fallback. Required files use `load_json_file[_sync]`; the existing
+candidate-path fallback loader still rejects unreadable existing files.
+
 Add to your `Cargo.toml`:
 
 ```toml

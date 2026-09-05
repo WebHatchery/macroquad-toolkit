@@ -36,6 +36,11 @@ use serde::de::DeserializeOwned;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
+mod fallback;
+#[cfg(not(target_arch = "wasm32"))]
+pub use fallback::load_json_file_with_fallback_sync;
+pub use fallback::{load_json_file_with_fallback, JsonFallbackPolicy};
+
 /// Deserialize JSON supplied by a game-data source.
 ///
 /// Project code should use this instead of calling `serde_json::from_str`

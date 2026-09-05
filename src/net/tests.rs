@@ -78,7 +78,7 @@ fn native_status_response_preserves_api_error_code() {
     .unwrap();
     let error = format_http_error(
         "GET /v1/events?since=9",
-        HttpError::UreqError(ureq::Error::Status(409, response)),
+        HttpError::UreqError(Box::new(ureq::Error::Status(409, response))),
     );
 
     assert!(error.contains("cursor_ahead"));

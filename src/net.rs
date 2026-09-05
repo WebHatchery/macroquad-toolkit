@@ -1,8 +1,8 @@
 //! Cross-platform, frame-polled JSON HTTP for Macroquad clients.
 //!
 //! Enable the toolkit's `net` feature to use this module. Requests use
-//! `quad-net`, which runs on a background thread on native and through the
-//! publisher's `quad-net.js` bridge on WASM. A request never blocks the game
+//! `ureq` on a background thread on native and the publisher's `quad-net.js`
+//! bridge on WASM. A request never blocks the game
 //! loop: retain the returned [`Pending`] value and poll it once per frame.
 //!
 //! The toolkit owns transport, request headers, JSON encoding/decoding, and
@@ -28,7 +28,12 @@
 //! ```
 
 use crate::data_loader::parse_json_labeled;
+#[cfg(target_arch = "wasm32")]
 use quad_net::http_request::{HttpError, Method, Request, RequestBuilder};
+#[cfg(not(target_arch = "wasm32"))]
+mod native;
+#[cfg(not(target_arch = "wasm32"))]
+use native::{HttpError, Method, Request, RequestBuilder};
 use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use std::marker::PhantomData;
@@ -109,11 +114,13 @@ impl<T: DeserializeOwned> Pending<T> {
             return Some(result);
         }
 
-        self.request.as_mut()?.try_recv().map(|result| {
+        let result = self.request.as_mut()?.try_recv()?;
+        self.request = None;
+        Some(
             result
                 .map_err(|error| format_http_error(&self.label, error))
-                .and_then(|body| decode_json(&self.label, &body))
-        })
+                .and_then(|body| decode_json(&self.label, &body)),
+        )
     }
 
     /// Poll and fail if no response arrives within `timeout` seconds.
@@ -127,6 +134,8 @@ impl<T: DeserializeOwned> Pending<T> {
         if let Some(result) = self.poll() {
             return Some(result);
         }
+
+        self.request.as_ref()?;
 
         self.elapsed += dt.max(0.0);
         let timeout = timeout.max(0.0);
@@ -160,7 +169,7 @@ fn api_error_message(label: &str, error: &Value) -> Option<String> {
 fn format_http_error(label: &str, error: HttpError) -> String {
     #[cfg(not(target_arch = "wasm32"))]
     if let HttpError::UreqError(error) = error {
-        return match error {
+        return match *error {
             ureq::Error::Status(status, response) => {
                 let body = response.into_string().unwrap_or_default();
                 if let Ok(value) = serde_json::from_str::<Value>(&body) {
