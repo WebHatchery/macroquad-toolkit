@@ -186,6 +186,20 @@ impl ParticleSystem {
         }
     }
 
+    /// Compatibility integration for effects with drag applied once per frame.
+    /// Position advances using the previous velocity, then gravity and the
+    /// caller's retention factor are applied. Per-particle per-second drag is
+    /// ignored. A zero-duration frame still applies drag, matching legacy loops.
+    pub fn update_frame_drag(&mut self, dt: f32, retention: f32) {
+        for particle in &mut self.particles {
+            particle.position += particle.velocity * dt;
+            particle.velocity.y += particle.gravity * dt;
+            particle.velocity *= retention;
+            particle.life -= dt;
+        }
+        self.particles.retain(|particle| particle.life > 0.0);
+    }
+
     /// Number of live particles.
     pub fn count(&self) -> usize {
         self.particles.len()

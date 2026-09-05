@@ -52,3 +52,31 @@ fn burst_respects_capacity() {
         assert!(particle.life > 0.0 && particle.life <= 0.8);
     }
 }
+#[test]
+fn frame_drag_matches_legacy_motion_including_zero_dt_and_expiry() {
+    let mut system = super::ParticleSystem::with_capacity(usize::MAX);
+    let mut position = macroquad::prelude::vec2(10.0, 20.0);
+    let mut velocity = macroquad::prelude::vec2(30.0, -15.0);
+    let mut life = 0.5;
+    system.spawn(super::Particle::new(
+        position,
+        velocity,
+        life,
+        2.0,
+        macroquad::prelude::WHITE,
+    ));
+    for dt in [0.016, 0.0, 0.1, 0.2, 0.3] {
+        position += velocity * dt;
+        velocity *= 0.92;
+        life -= dt;
+        system.update_frame_drag(dt, 0.92);
+        if life > 0.0 {
+            let particle = &system.particles()[0];
+            assert_eq!(particle.position, position);
+            assert_eq!(particle.velocity, velocity);
+            assert_eq!(particle.life, life);
+        } else {
+            assert!(system.is_empty());
+        }
+    }
+}
