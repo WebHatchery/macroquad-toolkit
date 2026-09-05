@@ -41,6 +41,7 @@
 //! ```
 
 mod autosave;
+mod backups;
 mod files;
 mod keys;
 mod save_root;
@@ -48,6 +49,7 @@ mod slots;
 mod version;
 
 pub use autosave::AutoSaveManager;
+pub use backups::{BackupChain, KeySaveStore, RawSaveStore, RecoveredSave, SaveIssue, SaveSource};
 pub use files::{
     file_exists, get_app_data_path, get_configured_save_path, get_nested_data_path,
     get_webhatchery_game_app_path,

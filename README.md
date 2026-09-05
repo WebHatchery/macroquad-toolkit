@@ -372,6 +372,27 @@ For a production key path that needs isolated native restart tests, use
 optional environment-variable argument supplies the complete native test path; browser builds keep
 using the normal qualified storage key.
 
+### Backup generations (`persistence` module)
+
+`BackupChain` rotates raw saves across a caller-selected number of generations.
+Use `with_generations("campaign", 3)` for `campaign_backup`, `campaign_backup_2`,
+and `campaign_backup_3`, or `new` with explicit historical names. `KeySaveStore`
+adapts the existing native/browser qualified key API; implement `RawSaveStore`
+for other stores or in-memory tests.
+
+Call `save` with a validator that rejects unsupported versions as well as corrupt
+data. Existing primary validation must succeed before replacement. Rotation
+preserves the original bytes and version envelope, skips invalid backup copies,
+and writes oldest-first and primary-last. A failed write can leave partially
+rotated backups, but cannot destroy the previous primary if the backend honors
+the single-key atomic-write contract. Serialize concurrent writers externally.
+
+`recover` accepts a game-owned decoder/migration callback and returns the value,
+`SaveSource`, and rejected candidates. Recovery never writes automatically.
+Quarantine or otherwise explicitly resolve an invalid primary before saving over
+it. Native read failures remain errors, distinct from absent files; the browser
+adapter inherits the existing bridge's missing/read-unavailable behavior.
+
 ### Audio (`audio` module)
 
 ```rust

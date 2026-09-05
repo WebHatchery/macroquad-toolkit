@@ -21,7 +21,7 @@ pub(super) fn sanitize_key(key: &str) -> String {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn key_file_name(key: &str) -> String {
+pub(super) fn key_file_name(key: &str) -> String {
     let sanitized = sanitize_key(key);
     if sanitized.ends_with(".json") {
         sanitized
