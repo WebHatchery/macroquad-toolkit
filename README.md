@@ -37,6 +37,12 @@ malformed runtime content. Both retain source-labeled errors and reject an
 invalid fallback. Required files use `load_json_file[_sync]`; the existing
 candidate-path fallback loader still rejects unreadable existing files.
 
+`DataRegistry::from_embedded_arrays` merges authored JSON arrays in order using
+caller-selected IDs. `overlay_json_directories` overlays sorted JSON files from
+the first readable native directory, reports invalid files, and is a no-op in
+browsers. Games choose directory precedence and identifiers; `into_map` returns
+the final map for game-owned validation and simulation.
+
 Add to your `Cargo.toml`:
 
 ```toml

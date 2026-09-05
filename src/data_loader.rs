@@ -37,6 +37,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 mod fallback;
+mod registry_sources;
 pub use fallback::load_json_file_with_fallback_sync;
 pub use fallback::{load_json_file_with_fallback, JsonFallbackPolicy};
 
@@ -187,10 +188,21 @@ pub async fn load_data<T: DeserializeOwned>(name: &str) -> Result<T, String> {
 
 /// Synchronous JSON file loading (native only)
 #[cfg(not(target_arch = "wasm32"))]
-pub fn load_json_file_sync<T: DeserializeOwned>(path: &str) -> Result<T, String> {
+pub fn load_json_file_sync<T: DeserializeOwned>(path: impl AsRef<Path>) -> Result<T, String> {
+    let path = path.as_ref();
     let content = std::fs::read_to_string(path)
-        .map_err(|error| format!("JSON data file read error in '{path}': {error}"))?;
-    parse_json_labeled(path, &content)
+        .map_err(|error| format!("JSON data file read error in '{}': {error}", path.display()))?;
+    parse_json_labeled(&path.display().to_string(), &content)
+}
+
+/// Synchronous loose-file reads are unavailable in browsers. Use the async
+/// loader or an embedded fallback when this path must work on WASM.
+#[cfg(target_arch = "wasm32")]
+pub fn load_json_file_sync<T: DeserializeOwned>(path: impl AsRef<Path>) -> Result<T, String> {
+    Err(format!(
+        "Synchronous JSON file read unavailable on WASM: {}",
+        path.as_ref().display()
+    ))
 }
 
 /// Build a path relative to a crate manifest directory.
@@ -377,6 +389,11 @@ impl<T> DataRegistry<T> {
     /// Merge another registry into this one
     pub fn merge(&mut self, other: DataRegistry<T>) {
         self.data.extend(other.data);
+    }
+
+    /// Transfer the indexed items into a game-owned map.
+    pub fn into_map(self) -> HashMap<String, T> {
+        self.data
     }
 }
 
