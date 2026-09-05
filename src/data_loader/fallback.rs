@@ -14,6 +14,8 @@ pub enum JsonFallbackPolicy {
 }
 
 /// Load a native runtime override, using fallback JSON according to `policy`.
+/// On WASM this synchronous API uses only the embedded/default copy; use the
+/// async counterpart when browser runtime overrides should be fetched.
 /// Unlike the existing candidate-path loader, this can fall back on read errors
 /// for an existing file. An invalid fallback always returns a labeled error.
 #[cfg(not(target_arch = "wasm32"))]
@@ -28,6 +30,19 @@ pub fn load_json_file_with_fallback_sync<T: DeserializeOwned>(
         std::fs::read_to_string(path).map_err(|error| error.to_string()),
         fallback_json,
         policy,
+    )
+}
+
+/// WASM synchronous loading uses the embedded/default copy without network I/O.
+#[cfg(target_arch = "wasm32")]
+pub fn load_json_file_with_fallback_sync<T: DeserializeOwned>(
+    path: impl AsRef<std::path::Path>,
+    fallback_json: &str,
+    _policy: JsonFallbackPolicy,
+) -> Result<T, String> {
+    parse_json_labeled(
+        &format!("embedded {}", path.as_ref().display()),
+        fallback_json,
     )
 }
 

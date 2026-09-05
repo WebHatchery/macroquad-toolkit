@@ -31,7 +31,7 @@ A collection of common utilities for Macroquad game development, extracted from 
 
 Runtime JSON overrides with historical fallback behavior can use
 `data_loader::load_json_file_with_fallback` (async native/WASM) or
-`load_json_file_with_fallback_sync` (native). Select `JsonFallbackPolicy::ReadError`
+`load_json_file_with_fallback_sync` (native runtime, WASM embedded-only). Select `JsonFallbackPolicy::ReadError`
 to fall back only when reading fails, or `ReadOrParseError` to also tolerate
 malformed runtime content. Both retain source-labeled errors and reject an
 invalid fallback. Required files use `load_json_file[_sync]`; the existing
