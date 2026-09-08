@@ -11,6 +11,7 @@ mod number;
 mod plaque;
 mod pointer;
 mod pseudo;
+mod scale;
 mod scroll_tabs;
 mod surfaces;
 mod widgets;
@@ -39,6 +40,7 @@ pub use pseudo::{
     active as pseudo_active, disable as pseudo_disable, enable as pseudo_enable,
     Once as PseudoOnce, Pseudo,
 };
+pub use scale::*;
 pub use scroll_tabs::*;
 pub use surfaces::*;
 pub use widgets::*;

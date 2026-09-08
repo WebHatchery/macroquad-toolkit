@@ -88,6 +88,22 @@ async fn main() {
 
 ## Modules
 
+### User interface scaling
+
+`GameSettings::ui_scale` stores a whole-interface preference from 75% to 150%
+and defaults to 100% for older saves. `apply_display()` applies it, or games
+with their own settings model can call `ui::set_ui_scale(value)` directly.
+This is independent of the existing text-only scale.
+
+For responsive layouts, create `ui::VirtualUi::scaled(320.0, 480.0)` each
+frame. Use its `logical_width` and `logical_height` for layout, call `begin()`
+to draw, and pass `|p| viewport.screen_to_ui(p)` to `Pointer::read`. Restore
+the default camera with `end_virtual_ui_frame()`. Minimum dimensions reduce
+the effective scale on small windows to keep the entire layout reachable.
+Existing fixed-resolution layouts are unchanged; they must opt into responsive
+layout before using the preference. Keep scale controls reachable by scrolling
+and offer a visible reset to 100%.
+
 ### Input (`input` module)
 
 ```rust

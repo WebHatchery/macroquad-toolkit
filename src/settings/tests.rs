@@ -18,6 +18,7 @@ fn partial_json_loads_with_defaults() {
     assert!(settings.fullscreen);
     assert!((settings.master_volume - 1.0).abs() < 1e-6);
     assert!(settings.screen_shake);
+    assert_eq!(settings.ui_scale, 1.0);
 }
 
 #[test]
@@ -64,6 +65,7 @@ fn round_trips_through_json() {
     let settings = GameSettings {
         music_volume: 0.3,
         show_fps: true,
+        ui_scale: 1.25,
         ..Default::default()
     };
     let json = serde_json::to_string(&settings).unwrap();

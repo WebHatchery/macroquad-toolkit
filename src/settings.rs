@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::persistence::{load_json_key, save_json_key};
-use crate::ui::set_ui_text_scale;
+use crate::ui::{sanitize_ui_scale, set_ui_scale, set_ui_text_scale};
 
 /// Storage key used by [`GameSettings::load`] and [`GameSettings::save`].
 pub const SETTINGS_KEY: &str = "settings";
@@ -51,6 +51,8 @@ pub struct GameSettings {
     /// Multiplier fed to the toolkit UI text scaling on
     /// [`apply_display`](Self::apply_display).
     pub ui_text_scale: f32,
+    /// Whole-interface scale for responsive `VirtualUi::scaled` layouts.
+    pub ui_scale: f32,
     /// Autosave cadence in seconds. Games that autosave on a timer read this
     /// instead of a hardcoded/config interval so players can tune it; clamped
     /// to `[5, 600]` by [`sanitize`](Self::sanitize).
@@ -74,6 +76,7 @@ impl Default for GameSettings {
             show_fps: false,
             screen_shake: true,
             ui_text_scale: 1.0,
+            ui_scale: 1.0,
             autosave_interval: 30.0,
             default_speed: 1,
             reduced_motion: false,
@@ -113,6 +116,7 @@ impl GameSettings {
     pub fn apply_display(&self) {
         set_fullscreen(self.fullscreen);
         set_ui_text_scale(self.ui_text_scale);
+        set_ui_scale(self.ui_scale);
         REDUCED_MOTION.store(self.reduced_motion, Ordering::Relaxed);
     }
 
@@ -129,6 +133,7 @@ impl GameSettings {
         self.sfx_volume = self.sfx_volume.clamp(0.0, 1.0);
         self.music_volume = self.music_volume.clamp(0.0, 1.0);
         self.ui_text_scale = self.ui_text_scale.clamp(0.25, 4.0);
+        self.ui_scale = sanitize_ui_scale(self.ui_scale);
         self.autosave_interval = self.autosave_interval.clamp(5.0, 600.0);
         self.default_speed = self.default_speed.clamp(0, 4);
         for binding in self.key_bindings.values_mut() {
