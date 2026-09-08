@@ -81,7 +81,7 @@ impl ScreenShake {
 
     /// A random offset for this frame, scaled by `trauma²` and `max_offset`.
     pub fn offset(&self) -> Vec2 {
-        if self.trauma <= 0.0 {
+        if self.trauma <= 0.0 || !crate::settings::screen_shake_enabled() {
             return Vec2::ZERO;
         }
         let magnitude = self.trauma * self.trauma * self.max_offset;

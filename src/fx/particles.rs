@@ -170,6 +170,9 @@ impl ParticleSystem {
     /// Draws every particle as a circle fading (and optionally shrinking)
     /// with remaining life.
     pub fn draw(&self) {
+        if crate::settings::reduced_motion_enabled() {
+            return;
+        }
         for particle in &self.particles {
             let fade = particle.life_fraction();
             let size = if particle.shrink {

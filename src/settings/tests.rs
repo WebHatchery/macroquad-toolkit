@@ -1,6 +1,53 @@
 use super::*;
 
 #[test]
+fn older_settings_preserve_game_defaults_for_missing_fields() {
+    let defaults = GameSettings {
+        autosave_enabled: false,
+        voice_volume: 0.7,
+        ..Default::default()
+    };
+    let saved = serde_json::json!({"music_volume": 0.25});
+    let loaded = GameSettings::overlay_defaults(saved, &defaults).unwrap();
+    assert!(!loaded.autosave_enabled);
+    assert_eq!(loaded.voice_volume, 0.7);
+    assert_eq!(loaded.music_volume, 0.25);
+}
+
+#[test]
+fn failed_save_preserves_committed_snapshot_and_cancel_restores_it() {
+    let mut editor = SettingsSession::new(GameSettings::default(), GameSettings::default());
+    editor.draft.music_volume = 0.1;
+    assert!(editor.commit_with(|_| Err("disk full".into())).is_err());
+    assert!(editor.is_dirty());
+    editor.cancel();
+    assert_eq!(editor.draft.music_volume, 0.8);
+    editor.draft.music_volume = 0.2;
+    editor.commit_with(|_| Ok(())).unwrap();
+    editor.reset_defaults();
+    editor.cancel();
+    assert_eq!(editor.draft.music_volume, 0.2);
+}
+
+#[test]
+fn nonfinite_values_are_repaired_and_autosave_is_wired() {
+    let mut settings = GameSettings {
+        master_volume: f32::NAN,
+        ui_text_scale: f32::INFINITY,
+        autosave_enabled: false,
+        autosave_interval: 90.0,
+        ..Default::default()
+    };
+    settings.sanitize();
+    assert_eq!(settings.master_volume, 1.0);
+    assert_eq!(settings.ui_text_scale, 1.0);
+    let mut scheduler = crate::persistence::AutoSaveManager::default();
+    settings.apply_autosave(&mut scheduler);
+    assert!(!scheduler.is_enabled());
+    assert_eq!(scheduler.interval_seconds(), 90.0);
+}
+
+#[test]
 fn effective_volumes_multiply_groups() {
     let settings = GameSettings {
         master_volume: 0.5,

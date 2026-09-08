@@ -104,6 +104,9 @@ pub fn pulse01_at(t: f64, speed: f32) -> f32 {
 /// Sine oscillation mapped to `[0, 1]` using the current [`get_time`].
 /// Replaces the common `(get_time() * k).sin()` glow/pulse idiom.
 pub fn pulse01(speed: f32) -> f32 {
+    if crate::settings::reduced_motion_enabled() {
+        return 0.5;
+    }
     pulse01_at(get_time(), speed)
 }
 

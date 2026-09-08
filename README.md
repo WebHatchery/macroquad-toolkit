@@ -29,6 +29,9 @@ A collection of common utilities for Macroquad game development, extracted from 
 
 ## Usage
 
+For reusable settings, audio routing, UI and autosave integration, see
+[Shared game settings](docs/SETTINGS.md).
+
 Runtime JSON overrides with historical fallback behavior can use
 `data_loader::load_json_file_with_fallback` (async native/WASM) or
 `load_json_file_with_fallback_sync` (native runtime, WASM embedded-only). Select `JsonFallbackPolicy::ReadError`

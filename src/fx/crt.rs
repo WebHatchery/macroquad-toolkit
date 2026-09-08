@@ -119,7 +119,7 @@ impl CrtOverlay {
             }
         }
 
-        if style.scan_band_alpha > 0.0 {
+        if style.scan_band_alpha > 0.0 && !crate::settings::reduced_motion_enabled() {
             let band_h = (h * 0.14).max(24.0);
             let y = scan_band_y(time, h, style.scan_band_speed, band_h);
             // A few stacked translucent strips fake a soft vertical gradient.
@@ -138,7 +138,7 @@ impl CrtOverlay {
             }
         }
 
-        if style.flicker_alpha > 0.0 {
+        if style.flicker_alpha > 0.0 && !crate::settings::reduced_motion_enabled() {
             let a = style.flicker_alpha * flicker_factor(time);
             draw_rectangle(0.0, 0.0, w, h, with_alpha(style.tint, a));
         }

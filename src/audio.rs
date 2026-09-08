@@ -7,7 +7,10 @@ use macroquad::audio::{
     load_sound, load_sound_from_bytes, play_sound, set_sound_volume, stop_sound, PlaySoundParams,
     Sound,
 };
+use std::cell::RefCell;
 use std::collections::HashMap;
+mod mixer;
+pub use mixer::{group_volume, AudioGroup};
 
 /// Trait for easier sound indexing (usually an Enum)
 pub trait SoundId: std::cmp::Eq + std::hash::Hash + Copy {}
@@ -16,6 +19,9 @@ impl<T: std::cmp::Eq + std::hash::Hash + Copy> SoundId for T {}
 /// Generic Sound Manager
 pub struct SoundManager<T: SoundId> {
     sounds: HashMap<T, Sound>,
+    managed: RefCell<HashMap<T, mixer::Playback>>,
+    settings: crate::settings::GameSettings,
+    focused: bool,
     asset_packs: Vec<AssetPack>,
     pub sfx_volume: f32,
     pub music_volume: f32,
@@ -27,6 +33,9 @@ impl<T: SoundId> SoundManager<T> {
     pub fn new() -> Self {
         Self {
             sounds: HashMap::new(),
+            managed: RefCell::new(HashMap::new()),
+            settings: crate::settings::GameSettings::default(),
+            focused: true,
             asset_packs: Vec::new(),
             sfx_volume: 1.0,
             music_volume: 1.0,
@@ -90,23 +99,12 @@ impl<T: SoundId> SoundManager<T> {
     ///
     /// The volume is multiplied by the global sfx_volume.
     pub fn play_sfx(&self, id: T, volume_multiplier: f32) {
-        if !self.visible {
-            return;
-        }
-
-        if let Some(sound) = self.sounds.get(&id) {
-            play_sound(
-                sound, // Sound is Copy in macroquad 0.4
-                PlaySoundParams {
-                    looped: false,
-                    volume: self.sfx_volume * volume_multiplier,
-                },
-            );
-        }
+        self.play_group(id, AudioGroup::Sfx, volume_multiplier, false);
     }
 
     /// Play a sound directly (ignoring volume settings, use carefully)
     pub fn play_raw(&self, id: T, params: PlaySoundParams) {
+        self.managed.borrow_mut().remove(&id);
         if !self.visible {
             return;
         }
@@ -125,6 +123,7 @@ impl<T: SoundId> SoundManager<T> {
 
     /// Stop a sound if it has been loaded.
     pub fn stop_raw(&self, id: T) {
+        self.managed.borrow_mut().remove(&id);
         if let Some(sound) = self.sounds.get(&id) {
             stop_sound(sound);
         }
