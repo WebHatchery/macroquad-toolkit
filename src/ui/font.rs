@@ -35,7 +35,8 @@ pub(crate) fn font_size_u16(font_size: f32) -> u16 {
     font_size.round().clamp(1.0, u16::MAX as f32) as u16
 }
 
-fn ui_text_scale() -> f32 {
+/// Current text-only multiplier, for hosts that compute wrapped row heights.
+pub fn ui_text_scale() -> f32 {
     UI_TEXT_SCALE.with(|stored| stored.borrow().clamp(0.25, 4.0))
 }
 
