@@ -1,6 +1,7 @@
 //! UI rendering utilities for buttons, panels, and progress bars
 
 mod bounds;
+mod canvas;
 mod contrast;
 mod font;
 mod format;
@@ -20,6 +21,7 @@ pub use bounds::{
     auditing, begin_audit, begin_collision_audit, current as current_region, current_surface,
     note_control, take_audit, Decorative, Finding, Region,
 };
+pub use canvas::UiCanvas;
 pub use contrast::{
     darken_until, flatten, passes as contrast_passes, ratio as contrast_ratio, Level,
 };

@@ -103,9 +103,12 @@ frame. Use its `logical_width` and `logical_height` for layout, call `begin()`
 to draw, and pass `|p| viewport.screen_to_ui(p)` to `Pointer::read`. Restore
 the default camera with `end_virtual_ui_frame()`. Minimum dimensions reduce
 the effective scale on small windows to keep the entire layout reachable.
-Existing fixed-resolution layouts are unchanged; they must opt into responsive
-layout before using the preference. Keep scale controls reachable by scrolling
-and offer a visible reset to 100%.
+For authored fixed-resolution layouts, use `ui::UiCanvas` to zoom without
+switching layouts. It centers smaller content and supplies external touchable
+scrollbars for enlarged content. Store normalized pan coordinates, call
+`navigate` before rebuilding the canvas, use `pointer` for clipped input, and
+draw its navigation after restoring the default camera. Offer a visible reset
+to 100% in settings.
 
 ### Input (`input` module)
 
