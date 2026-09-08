@@ -373,12 +373,22 @@ pub fn draw_notifications_with_offset(
     config: &NotificationRenderConfig,
     offset: Vec2,
 ) {
-    let origin = notification_origin(
+    draw_notifications_in_viewport(
+        notifications,
         config,
-        notifications.len(),
         vec2(screen_width(), screen_height()),
         offset,
     );
+}
+
+/// Draw in a host's UI coordinates, including a scaled responsive viewport.
+pub fn draw_notifications_in_viewport(
+    notifications: &[Notification],
+    config: &NotificationRenderConfig,
+    viewport: Vec2,
+    offset: Vec2,
+) {
+    let origin = notification_origin(config, notifications.len(), viewport, offset);
 
     for (index, notification) in notifications.iter().enumerate() {
         let y = origin.y + index as f32 * (config.row_height + config.spacing);

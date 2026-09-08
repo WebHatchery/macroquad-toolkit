@@ -1,5 +1,22 @@
 use super::*;
-use macroquad::prelude::vec2;
+use macroquad::prelude::{vec2, Vec2};
+
+#[test]
+fn responsive_scaling_fills_the_window_and_changes_available_layout_space() {
+    for scale in [0.75, 0.95, 1.0, 1.25, 1.5, 2.0] {
+        let ui = VirtualUi::from_responsive_screen_size(1280.0, 720.0, scale);
+        assert_eq!(ui.offset, Vec2::ZERO);
+        assert_eq!(ui.viewport_for_dpi(2.0), (0, 0, 2560, 1440));
+        assert_eq!(ui.logical_width, 1280.0 / scale);
+        let bottom_right = vec2(ui.logical_width, ui.logical_height);
+        assert!(ui.ui_to_screen(bottom_right).distance(vec2(1280.0, 720.0)) < 0.001);
+        assert!(
+            ui.screen_to_ui(ui.ui_to_screen(vec2(100.0, 200.0)))
+                .distance(vec2(100.0, 200.0))
+                < 0.001
+        );
+    }
+}
 
 #[test]
 fn scaling_resizes_layout_and_keeps_input_aligned() {

@@ -93,23 +93,17 @@ async fn main() {
 
 ### User interface scaling
 
-`GameSettings::ui_scale` stores a whole-interface preference from 75% to 150%
-and defaults to 100% for older saves. `apply_display()` applies it, or games
-with their own settings model can call `ui::set_ui_scale(value)` directly.
-This is independent of the existing text-only scale.
+`GameSettings::ui_scale` stores a 75–200% interface preference, defaulting to
+100%. Apply it with `apply_display()` or `ui::set_ui_scale(value)`. Text-only
+scaling remains independent.
 
-For responsive layouts, create `ui::VirtualUi::scaled(320.0, 480.0)` each
-frame. Use its `logical_width` and `logical_height` for layout, call `begin()`
-to draw, and pass `|p| viewport.screen_to_ui(p)` to `Pointer::read`. Restore
-the default camera with `end_virtual_ui_frame()`. Minimum dimensions reduce
-the effective scale on small windows to keep the entire layout reachable.
-For authored fixed-resolution layouts, use `ui::UiCanvas` to zoom without
-switching layouts. It centers smaller content and supplies external touchable
-scrollbars for enlarged content. Store normalized pan coordinates, call
-`navigate` before rebuilding the canvas, use `pointer` for clipped input, and
-draw its navigation after restoring the default camera. Offer a visible reset
-to 100% in settings.
-
+Create `ui::VirtualUi::responsive()` each frame and lay out panels against its
+logical dimensions. Smaller scales expose more usable layout space; larger
+scales require panels to reflow or scroll their own contents. The viewport
+always fills the window. Use `begin()` and `screen_to_ui()` together, then
+restore the world/default camera with `end_virtual_ui_frame()`. Never use the
+UI preference for a world camera or scale a fixed-size screenshot of the UI.
+Notifications can use `draw_notifications_in_viewport` with the same bounds.
 ### Input (`input` module)
 
 ```rust
