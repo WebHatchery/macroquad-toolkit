@@ -2,7 +2,13 @@
 
 use macroquad::prelude::*;
 
+pub mod actions;
+pub mod bindings;
+mod capture;
+pub mod controls;
 pub mod gestures;
+pub mod remap;
+pub use capture::ActionInput;
 pub use gestures::{GestureTouch, TouchGesture, TouchGestureFrame};
 
 /// Current mouse position as a `Vec2`.

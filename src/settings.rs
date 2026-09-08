@@ -59,6 +59,8 @@ pub fn reduced_motion_enabled() -> bool {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct GameSettings {
+    pub controls: crate::input::controls::ControlSettings,
+    pub camera: crate::camera::CameraPreferences,
     /// Master volume in `[0, 1]`, multiplied into both groups.
     pub master_volume: f32,
     /// Sound-effect group volume in `[0, 1]`.
@@ -95,6 +97,8 @@ pub struct GameSettings {
 impl Default for GameSettings {
     fn default() -> Self {
         Self {
+            controls: Default::default(),
+            camera: Default::default(),
             master_volume: 1.0,
             sfx_volume: 1.0,
             music_volume: 0.8,
@@ -141,10 +145,9 @@ impl GameSettings {
     fn overlay_defaults(saved: serde_json::Value, defaults: &Self) -> Result<Self, String> {
         let mut merged = serde_json::to_value(defaults).map_err(|e| e.to_string())?;
         let fields = saved.as_object().ok_or("Settings must be a JSON object")?;
-        merged
-            .as_object_mut()
-            .ok_or("Invalid defaults")?
-            .extend(fields.clone());
+        for (key, value) in fields {
+            merge_setting_value(&mut merged[key], value);
+        }
         let mut settings: Self =
             serde_json::from_value(merged).map_err(|e| format!("Invalid settings: {e}"))?;
         settings.sanitize();
@@ -199,6 +202,8 @@ impl GameSettings {
     /// Clamps all volumes and the UI scale to sane ranges. Useful after
     /// loading externally edited settings files.
     pub fn sanitize(&mut self) {
+        self.controls.sanitize();
+        self.camera.sanitize();
         self.master_volume = finite(self.master_volume, 0.0, 1.0, 1.0);
         self.sfx_volume = finite(self.sfx_volume, 0.0, 1.0, 1.0);
         self.music_volume = finite(self.music_volume, 0.0, 1.0, 0.8);
@@ -214,6 +219,19 @@ impl GameSettings {
                 *binding = "Unassigned".to_string();
             }
         }
+    }
+}
+
+fn merge_setting_value(base: &mut serde_json::Value, value: &serde_json::Value) {
+    if let (Some(base), Some(value)) = (base.as_object_mut(), value.as_object()) {
+        for (key, value) in value {
+            merge_setting_value(
+                base.entry(key.clone()).or_insert(serde_json::Value::Null),
+                value,
+            );
+        }
+    } else {
+        *base = value.clone();
     }
 }
 

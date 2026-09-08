@@ -15,6 +15,24 @@ fn older_settings_preserve_game_defaults_for_missing_fields() {
 }
 
 #[test]
+fn partial_nested_settings_preserve_game_defaults_and_explicit_unbinding() {
+    let mut defaults = GameSettings::default();
+    defaults.controls.dead_zone = 0.3;
+    defaults.controls.bindings.insert(
+        "jump".into(),
+        vec![crate::input::bindings::Binding::Key("Space".into())],
+    );
+    defaults.camera.pan_speed = 2.0;
+    let saved = serde_json::json!({"controls": {"invert_y": true, "bindings": {"jump": []}}, "camera": {"zoom_speed": 3.0}});
+    let loaded = GameSettings::overlay_defaults(saved, &defaults).unwrap();
+    assert_eq!(loaded.controls.dead_zone, 0.3);
+    assert!(loaded.controls.invert_y);
+    assert!(loaded.controls.bindings["jump"].is_empty());
+    assert_eq!(loaded.camera.pan_speed, 2.0);
+    assert_eq!(loaded.camera.zoom_speed, 3.0);
+}
+
+#[test]
 fn failed_save_preserves_committed_snapshot_and_cancel_restores_it() {
     let mut editor = SettingsSession::new(GameSettings::default(), GameSettings::default());
     editor.draft.music_volume = 0.1;

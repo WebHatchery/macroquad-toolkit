@@ -2,7 +2,9 @@
 
 use macroquad::prelude::*;
 
+mod controls;
 mod transform;
+pub use controls::{register_camera_actions, CameraController, CameraFrame, CameraPreferences};
 pub use transform::{CameraBoundsPolicy, CameraTransform};
 
 /// Optional camera bounds in world space.

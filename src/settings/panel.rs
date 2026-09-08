@@ -15,6 +15,10 @@ pub struct SettingsFeatures {
     pub text_scale: bool,
     pub effects: bool,
     pub autosave: bool,
+    pub controls: bool,
+    pub controller: bool,
+    pub camera: bool,
+    pub camera_rotation: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -159,6 +163,97 @@ impl SettingsPanel {
                 5.0,
                 600.0,
                 5.0,
+            ));
+        }
+        if features.controls {
+            rows.push(Row::Number(
+                "Mouse X sensitivity",
+                |s| &mut s.controls.mouse_sensitivity[0],
+                0.1,
+                5.0,
+                0.1,
+            ));
+            rows.push(Row::Number(
+                "Mouse Y sensitivity",
+                |s| &mut s.controls.mouse_sensitivity[1],
+                0.1,
+                5.0,
+                0.1,
+            ));
+            rows.push(Row::Toggle("Invert X", |s| &mut s.controls.invert_x));
+            rows.push(Row::Toggle("Invert Y", |s| &mut s.controls.invert_y));
+        }
+        if features.controller {
+            rows.push(Row::Number(
+                "Stick X sensitivity",
+                |s| &mut s.controls.stick_sensitivity[0],
+                0.1,
+                5.0,
+                0.1,
+            ));
+            rows.push(Row::Number(
+                "Stick Y sensitivity",
+                |s| &mut s.controls.stick_sensitivity[1],
+                0.1,
+                5.0,
+                0.1,
+            ));
+            rows.push(Row::Number(
+                "Stick dead zone",
+                |s| &mut s.controls.dead_zone,
+                0.0,
+                0.95,
+                0.05,
+            ));
+            rows.push(Row::Toggle("Vibration", |s| &mut s.controls.vibration));
+            rows.push(Row::Number(
+                "Vibration strength",
+                |s| &mut s.controls.vibration_strength,
+                0.0,
+                1.0,
+                0.1,
+            ));
+        }
+        if features.camera {
+            rows.push(Row::Number(
+                "Camera pan speed",
+                |s| &mut s.camera.pan_speed,
+                0.1,
+                5.0,
+                0.1,
+            ));
+            rows.push(Row::Number(
+                "Camera zoom speed",
+                |s| &mut s.camera.zoom_speed,
+                0.1,
+                5.0,
+                0.1,
+            ));
+            rows.push(Row::Toggle("Edge scrolling", |s| {
+                &mut s.camera.edge_scrolling
+            }));
+            rows.push(Row::Number(
+                "Edge scroll speed",
+                |s| &mut s.camera.edge_scroll_speed,
+                0.1,
+                5.0,
+                0.1,
+            ));
+            rows.push(Row::Number(
+                "Camera smoothing",
+                |s| &mut s.camera.smoothing,
+                0.0,
+                1.0,
+                0.05,
+            ));
+        }
+        if features.camera_rotation {
+            rows.push(Row::Number(
+                "Camera rotation speed",
+                |s| &mut s.camera.rotation_speed,
+                0.1,
+                5.0,
+                0.1,
             ));
         }
         let count = ((rect.h - 112.0) / 76.0).floor().max(1.0) as usize;

@@ -18,6 +18,11 @@ game defaults. Defaults edits the draft; Cancel restores the committed snapshot.
 `commit` sanitizes and saves before advancing the committed snapshot. On failure,
 show the error and allow retry; do not apply runtime settings yet.
 
+If an existing game stores additional settings in the same file, retain its typed
+wrapper and use `commit_with` to save that complete payload. Do not replace a
+game's composite settings file with the common settings alone. Unknown JSON
+fields are tolerated on load but are not retained by `GameSettings` serialization.
+
 `SettingsPanel::draw` uses opt-in `SettingsFeatures`. It provides paginated controls
 with visible Previous, Next, Defaults, Cancel and Apply buttons. Pass a rectangle
 at least 320x300 logical pixels and a `Pointer` in matching coordinates. Draw in
@@ -70,9 +75,93 @@ gameplay cues and consult `reduced_motion_enabled` for their own animated effect
 `apply_autosave` updates both enablement and interval on `AutoSaveManager`. Games
 still own save serialization and the safe-to-save predicate passed to `update`.
 
-## Validation
+## Controls and camera integration
+
+See [the compiling integration example](../examples/shared_settings.rs) for a
+map with visible pan/zoom controls, touch gestures, settings editing, rebinding,
+persistence and a display confirmation flow. It is a library adoption reference,
+not a published game. The example deliberately does not expose audio or autosave
+controls because its map has no sounds or progress to save.
+
+1. Register game actions in `input::actions::ActionMap`. Each action has a stable
+   ID, the exact visible touch-control label and default `Binding`s. For a direct
+   gesture, use `with_touch_instruction("Drag the map")` instead of implying a
+   button exists. Import
+   `input::bindings::GamepadButton` without adding another dependency to the game.
+2. Store preferences in `GameSettings.controls` and `.camera`. Missing nested
+   fields inherit the game's defaults; empty binding arrays mean intentionally
+   unbound. Keep legacy `key_bindings` only for compatibility. If a game actually
+   used those labels as bindings, explicitly call `ActionMap::migrate_legacy`;
+   this preserves controller defaults and existing real overrides.
+3. Poll `ActionInput::capture(&settings.controls)` once per frame. It supplies
+   physical button states, corrected mouse deltas, dead-zone-adjusted sticks and
+   active-device activity. Do not simultaneously poll legacy `GamepadInput`.
+4. Add visible button action IDs to `ActionSnapshot.touch_pressed` for one-frame
+   clicks, or `.touch_down` for held controls. Choose one convention per target;
+   do not inject a second press on release of a held toggle control. Feed separate
+   touches to multiple targets when the game needs simultaneous touch controls.
+5. Call `ActionRuntime::update`, then consume `state(id).pressed`, `.down` or
+   `.released`. `ActionMode::Toggle` is optional per action. Clear runtime state
+   on menu/context changes, focus loss and applied remapping. Separate action maps
+   represent mutually exclusive contexts; only update the active one.
+6. `ActionMap::prompt` always names the visible touch control and supplements it
+   with a binding for the active device. Controller labels currently use neutral
+   physical names; branded glyph assets are a future extension.
+
+`RebindPanel::draw` edits the same session's controls draft. Give it at least
+320x400 logical pixels. Navigation, device selection, clear, reset, Done and
+capture cancellation all have tap targets. Capture waits up to ten seconds and
+does not consume the click that opened it. A conflict keeps the previous binding
+and displays its owner. The panel replaces bindings for one device at a time;
+the lower-level `ActionMap::rebind` accepts multiple alternatives per device.
+Use `ActionMap::conflicts` to diagnose conflicting defaults or edited saves.
+Default and restored bindings should be conflict-free within each action map.
+The settings panels use Pointer navigation; controller-only panel focus navigation
+is not implemented yet. Gamepad input/remapping works for registered game actions.
+
+Enable `SettingsFeatures.controls`, `.controller`, `.camera` and, only for cameras
+supporting rotation, `.camera_rotation` to expose relevant preference controls.
+Mouse X/Y sensitivity affects relative camera/input deltas, never the OS cursor.
+Stick input has a radial dead zone rescaled to full range, independent X/Y
+sensitivity and axis inversion. `ActionInput::rumble` applies vibration enablement
+and strength; actual actuator support depends on the existing gamepads backend.
+Android retains the legacy no-controller fallback. Browser hosts still need the
+existing gamepads JavaScript plugin; no new JS bridge is installed by this API.
+
+`register_camera_actions` supplies pan, zoom and drag defaults, plus optional
+rotation actions. Give every required action a visible touch control or explicit
+gesture. Use `CameraFrame::from_actions` with the corrected left stick, add the
+mouse drag delta only when the drag action is down, and add `TouchGesture` pan,
+pinch scale and center. Do not feed synthesized mouse drag and touch pan together.
+
+Call `CameraController::update_2d` **instead of** legacy `Camera2D::update`.
+It retains camera bounds and zoom limits, anchors zoom at the pointer, and applies
+speed, edge scrolling and smoothing. Supply the viewport in the same coordinates
+as the pointer. Set `captured` while any menu owns input: this stops all camera
+input and clears residual smoothing. Edge scrolling requires a hovering pointer
+inside the viewport, so a finger cannot accidentally activate it. Reduced motion
+disables camera smoothing. `rotate_isometric` applies the shared rotation action
+and speed to the toolkit's isometric camera. Other 3D movement/follow rules remain
+game-owned until a shared adapter is needed.
+
+The host still supplies focus signals to audio and clears gameplay input on focus
+loss. Controller disconnect releases held physical actions on the next capture;
+toggle actions intentionally retain their state until cleared or toggled again.
+
+## Future additions
+
+See [the settings roadmap](SETTINGS_ROADMAP.md) for remaining features, ownership
+and acceptance criteria. Do not expose settings without a runtime implementation.
+
+## Validation details
 
 This library has no `publish.ps1`; the prescribed publishing path cannot run here.
 Use library/unit/doc tests and native/WASM compile checks as additional checks,
 then validate each adopting game's own default `publish.ps1`. This is not evidence
 of hardware controller, audio-device or browser interaction testing.
+
+Browser library/example builds support these APIs. The broader WASM all-targets
+check currently also compiles pre-existing persistence tests which reference
+native-only `key_file_name`; that test-target check fails independently of these
+settings modules. Native all-feature tests and strict all-target Clippy are the
+applicable automated regression checks for this change.
