@@ -2,6 +2,7 @@
 
 mod bounds;
 mod contrast;
+mod clip;
 mod font;
 mod format;
 mod forms;
