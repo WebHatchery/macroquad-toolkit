@@ -4,6 +4,7 @@ use macroquad::prelude::*;
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
 use zip::ZipArchive;
+pub mod chroma;
 
 /// Manages texture assets with caching
 ///
