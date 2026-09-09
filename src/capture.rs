@@ -17,8 +17,8 @@
 //! - `PREFIX_HEADLESS` — hide the game window; on by default while capturing,
 //!   set to `0` to watch the run (see [`headless`])
 //!
-//! Integration (see `docs/screenshot_capture_harness_guide.md` for the full
-//! walkthrough and gotchas):
+//! Integration (see the repository's `MACROQUAD_TOOLKIT.md`, Screenshot capture
+//! section, for the wrapper commands and supported options):
 //!
 //! ```ignore
 //! fn window_conf() -> Conf {

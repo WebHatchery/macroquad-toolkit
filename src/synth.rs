@@ -1,10 +1,8 @@
 //! Procedural sound synthesis: build effects in code instead of shipping files.
 //!
-//! [`SoundManager`](crate::sound) can only load audio from a file or an asset
-//! pack, so a game that wants a blip has to find a `.wav` from somewhere. This
-//! renders one from a handful of oscillators instead — no assets, nothing to
-//! fetch over the wire, and the whole sound set editable as code the same way a
-//! shape is editable as drawing calls.
+//! Generate WAV bytes from oscillators for playback alongside the loaded sounds
+//! managed by [`SoundManager`](crate::audio::SoundManager). Procedural effects
+//! need no external audio assets and can be authored directly in code.
 //!
 //! An effect is a list of [`Voice`]s. Each is one tone: a waveform, a pitch
 //! glide, an attack/decay envelope and a start offset. They are summed and
@@ -27,7 +25,7 @@
 //!
 //! # Determinism
 //!
-//! Noise voices draw from a [`SeededRng`](crate::rng::SeededRng) passed a fixed
+//! Noise voices draw from a [`SeededRng`] passed a fixed
 //! seed, so a given set of voices always renders byte-identical audio. That
 //! matters more than it sounds: it means an effect can be checksummed in a test,
 //! and a refactor that quietly changed every sound in a game would fail rather

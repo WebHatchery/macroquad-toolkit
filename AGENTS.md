@@ -1,6 +1,16 @@
 # RustGames Agent Instructions
 
-These instructions apply to all Rust game projects in this workspace.
+These workspace rules apply to this toolkit and its consuming games.
+
+## Repository scope
+
+This repository is the shared library, not a catalog game. `src/lib.rs` owns its
+public API and `examples/shared_settings.rs` is the integration example. There
+is no `publish.ps1`, game web host or catalog thumbnail here; report the missing
+publisher and use the additional package checks documented in [README.md](README.md).
+Game publishing and thumbnail requirements below apply to consuming games.
+Use [MACROQUAD_TOOLKIT.md](MACROQUAD_TOOLKIT.md) as the integration guide and
+[CODE_STANDARDS.md](CODE_STANDARDS.md) as the local contribution reference.
 
 ## Project Standards
 

@@ -9,7 +9,7 @@ should use `..Default::default()` to accommodate added preferences.
 
 `GameSettings::load_with_defaults(game, &defaults)` overlays stored fields onto
 game defaults and sanitizes values. Missing or corrupt storage returns an error;
-the host can explain it and use its defaults. `load` retains the old silent
+the host can explain it and use its defaults. `load` provides a silent
 fallback convenience. Older flat JSON settings remain readable. Settings are
 separate from progress, under the existing per-game `settings` storage key.
 
@@ -27,7 +27,10 @@ fields are tolerated on load but are not retained by `GameSettings` serializatio
 with visible Previous, Next, Defaults, Cancel and Apply buttons. Pass a rectangle
 at least 320x300 logical pixels and a `Pointer` in matching coordinates. Draw in
 the UI camera, after the world. Keep this recovery panel in a stable coordinate
-space while previewing UI scaling; game HUD layouts can use `VirtualUi::scaled`.
+space while previewing UI scaling. Game HUDs can use `VirtualUi::responsive()`
+and reflow against its logical bounds; `VirtualUi::scaled` additionally fits
+minimum dimensions and can reduce the requested scale. UI scale supports
+75–200%, independent of text scaling.
 Do not send its pointer events to gameplay while it is open.
 
 After a successful Apply, and once at startup:
@@ -62,7 +65,7 @@ event hooks. Group gain is multiplied by master gain and optional focus muting.
 Macroquad adjusts volume per loaded sound asset, not per playback instance. A
 sound ID has one managed group/gain at a time. Load distinct IDs when independent
 routing is required. `play_raw` deliberately opts that ID out of managed routing;
-`stop_raw` removes its routing record. The historical `visible` flag still gates
+`stop_raw` removes its routing record. The `visible` flag still gates
 new playback, and is not the focus-muting integration.
 
 `apply_display` also applies effect preferences; headless callers can use
@@ -95,7 +98,7 @@ controls because its map has no sounds or progress to save.
    this preserves controller defaults and existing real overrides.
 3. Poll `ActionInput::capture(&settings.controls)` once per frame. It supplies
    physical button states, corrected mouse deltas, dead-zone-adjusted sticks and
-   active-device activity. Do not simultaneously poll legacy `GamepadInput`.
+   active-device activity. Do not simultaneously poll `GamepadInput`.
 4. Add visible button action IDs to `ActionSnapshot.touch_pressed` for one-frame
    clicks, or `.touch_down` for held controls. Choose one convention per target;
    do not inject a second press on release of a held toggle control. Feed separate
@@ -106,7 +109,7 @@ controls because its map has no sounds or progress to save.
    represent mutually exclusive contexts; only update the active one.
 6. `ActionMap::prompt` always names the visible touch control and supplements it
    with a binding for the active device. Controller labels currently use neutral
-   physical names; branded glyph assets are a future extension.
+   physical names; branded controller glyph assets are not provided.
 
 `RebindPanel::draw` edits the same session's controls draft. Give it at least
 320x400 logical pixels. Navigation, device selection, clear, reset, Done and
@@ -125,7 +128,7 @@ Mouse X/Y sensitivity affects relative camera/input deltas, never the OS cursor.
 Stick input has a radial dead zone rescaled to full range, independent X/Y
 sensitivity and axis inversion. `ActionInput::rumble` applies vibration enablement
 and strength; actual actuator support depends on the existing gamepads backend.
-Android retains the legacy no-controller fallback. Browser hosts still need the
+Android uses a no-controller fallback. Browser hosts still need the
 existing gamepads JavaScript plugin; no new JS bridge is installed by this API.
 
 `register_camera_actions` supplies pan, zoom and drag defaults, plus optional
@@ -134,7 +137,7 @@ gesture. Use `CameraFrame::from_actions` with the corrected left stick, add the
 mouse drag delta only when the drag action is down, and add `TouchGesture` pan,
 pinch scale and center. Do not feed synthesized mouse drag and touch pan together.
 
-Call `CameraController::update_2d` **instead of** legacy `Camera2D::update`.
+Call `CameraController::update_2d` **instead of** `Camera2D::update`.
 It retains camera bounds and zoom limits, anchors zoom at the pointer, and applies
 speed, edge scrolling and smoothing. Supply the viewport in the same coordinates
 as the pointer. Set `captured` while any menu owns input: this stops all camera
@@ -148,20 +151,16 @@ The host still supplies focus signals to audio and clears gameplay input on focu
 loss. Controller disconnect releases held physical actions on the next capture;
 toggle actions intentionally retain their state until cleared or toggled again.
 
-## Future additions
+## Supported scope and validation
 
-See [the settings roadmap](SETTINGS_ROADMAP.md) for remaining features, ownership
-and acceptance criteria. Do not expose settings without a runtime implementation.
+Expose only settings with a runtime implementation in the adopting game. The
+shared panel does not implement controller-only focus navigation, automatic
+focus/visibility detection, cloud saves, localization, accessibility bridges or
+renderer/audio-device selection. Host-provided focus signals and visible
+pointer/touch recovery controls remain required. Game-specific difficulty,
+progress deletion and gameplay assistance belong to the game.
 
-## Validation details
-
-This library has no `publish.ps1`; the prescribed publishing path cannot run here.
-Use library/unit/doc tests and native/WASM compile checks as additional checks,
-then validate each adopting game's own default `publish.ps1`. This is not evidence
-of hardware controller, audio-device or browser interaction testing.
-
-Browser library/example builds support these APIs. The broader WASM all-targets
-check currently also compiles pre-existing persistence tests which reference
-native-only `key_file_name`; that test-target check fails independently of these
-settings modules. Native all-feature tests and strict all-target Clippy are the
-applicable automated regression checks for this change.
+See [README validation](../README.md#validation) for package-scoped tests and
+native/WASM checks. This library has no `publish.ps1`; adopting games use their
+own no-argument publisher. Compile/unit checks do not establish actual controller,
+audio-device or browser interaction behavior.

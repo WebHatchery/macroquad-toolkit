@@ -8,7 +8,7 @@
 //! every edit is arithmetic, and a wrong note is indistinguishable from a typo.
 //!
 //! So this module adds the layer above: a scale, a tempo, and notes placed on
-//! beats by degree. [`lay`] turns those into the [`Voice`](crate::synth::Voice)
+//! beats by degree. [`lay`] turns those into the [`Voice`]
 //! list the synth already renders, and nothing in `synth` had to change.
 //!
 //! # Loops that can be layered

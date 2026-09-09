@@ -1,706 +1,240 @@
-# Macroquad Toolkit
-
-A collection of common utilities for Macroquad game development, extracted from multiple games to reduce duplication and provide consistent patterns.
-
-## Features
-
-- **Input utilities**: Mouse hovering, clicking, rectangle collision detection
-- **UI rendering**: Buttons (with press/release variants), panels, progress bars
-- **Asset management**: Texture loading and caching
-- **JSON game data**: Typed embedded/runtime loading, labeled diagnostics, native/WASM handling, and fallback paths
-- **Camera2D**: Pan and zoom for 2D games
-- **Event bus**: Generic event system for decoupled game logic
-- **Color palettes**: Consistent dark theme colors
-- **Sprite system**: Builder pattern for texture rendering with transformations
-- **Screenshot capture**: Env-var-driven headless capture harness for visual verification
-- **Color helpers**: `with_alpha`, `lighten`/`darken`, `mix`, HSV conversion, hue shift
-- **Math**: lerp/smoothstep/approach, easing curves, time-based pulse, square-wave `blink`, `Tween`
-- **Timing**: `Cooldown`, `Timer`, `IntervalTimer`, `Timeline` phase sequencer
-- **FX**: trauma screen shake, screen fades, pooled particles, floating text, terminal typewriter (single string + `reveal_block` for multi-line streams)
-- **Form widgets**: toggle, checkbox, slider, stepper, segmented bar, keycap
-- **Scroll & tabs**: `ScrollArea` with drawn scrollbar, tab bars / nav columns
-- **Settings**: shared `GameSettings` (volume groups, fullscreen, UI scale) with persistence
-- **Achievements**: unlock registry that serializes into saves
-- **Debug overlay**: toggleable smoothed FPS/frame-time panel
-- **Raster**: CPU pixel drawing onto `Image` (primitives, Bresenham, seeded noise)
-- **Sprite variation**: seeded HSV-region recolor with per-(id, seed) texture cache
-- **Projectiles**: `ProjectileLayer` travel-lerp visuals delivering payloads on arrival
-- **Hover tooltip**: delayed, fading tooltip state (`HoverTooltip`)
-- **Plaques**: ornamented title/menu buttons with corner marks and style hooks
-- **Menu cursor**: wrap-around keyboard selection for pause/settings menus
-- **Optional networking**: frame-polled JSON HTTP for native and WASM clients
-
-## Usage
-
-Add to your `Cargo.toml`:
-
-```toml
-[dependencies]
-macroquad-toolkit = { path = "../macroquad-toolkit" }
-```
-
-### Quick Start
-
-```rust
-use macroquad::prelude::*;
-use macroquad_toolkit::prelude::*;
-
-#[macroquad::main("My Game")]
-async fn main() {
-    let mut assets = AssetManager::new();
-    assets.load_texture("player", "assets/player.png").await.ok();
-
-    loop {
-        clear_background(dark::BACKGROUND);
-
-        // Draw a button
-        if button(10.0, 10.0, 100.0, 40.0, "Click Me") {
-            println!("Button clicked!");
-        }
-
-        next_frame().await;
-    }
-}
-```
-
-## Modules
-
-### JSON game data (`data_loader` module)
-
-Keep schemas and semantic validation in the game, but route all generic JSON parsing and loading through the toolkit:
-
-```rust
-#[derive(serde::Deserialize)]
-struct GameConfig {
-    starting_gold: u32,
-}
-
-let embedded: GameConfig =
-    macroquad_toolkit::include_json!("../assets/data/game_config.json")?;
-
-let runtime: GameConfig =
-    macroquad_toolkit::data_loader::load_json_file("assets/data/game_config.json").await?;
-```
-
-Use `parse_json_labeled` when JSON already arrived as a string. Do not create project-local generic wrappers around `serde_json`; the toolkit provides consistent source names, line/column diagnostics, native/WASM loading, and embedded fallback support.
-
-### Client/server networking (`net` feature)
-
-Authoritative games can enable the optional transport without copying the
-cross-platform HTTP bridge:
-
-```toml
-macroquad-toolkit = { path = "../macroquad-toolkit", features = ["net"] }
-```
-
-The feature provides [`net::HttpClient`] and [`net::Pending<T>`]. The client
-owns its protocol structs, endpoint paths, session lifecycle, retry policy, and
-server; the toolkit owns only request construction, shared headers, JSON
-encoding/decoding, and frame-polled completion:
-
-```rust,ignore
-use macroquad_toolkit::net::{HttpClient, Pending};
-use serde::{Deserialize, Serialize};
-
-#[derive(Deserialize)]
-struct WorldView { tick: u64 }
-#[derive(Serialize)]
-struct MoveCommand { x: i32, y: i32 }
-
-let mut api = HttpClient::new("https://example.test/api");
-api.set_header("X-Session-Id", "session-id");
-api.set_bearer_token(Some("account-token"));
-let mut view: Pending<WorldView> = api.get("/view");
-let mut move_request: Pending<WorldView> =
-    api.post_json("/move", &MoveCommand { x: 1, y: 2 });
-
-// In the Macroquad update loop, never block on either request.
-if let Some(result) = view.poll_timed(dt, 6.0) {
-    // Adopt the server projection or surface the transport/JSON error.
-}
-if let Some(result) = move_request.poll_timed(dt, 6.0) {
-    // Apply server feedback.
-}
-```
-
-`poll_timed` is important for WASM because the browser bridge cannot report a
-refused connection as a normal response. A timeout should transition the
-game's connection state and be followed by an application-owned retry
-cooldown. The shared RustGames publisher includes `quad-net.js` in WebGL
-packages when this feature is used.
-
-### Input (`input` module)
-
-```rust
-use macroquad_toolkit::input::*;
-
-// Check if mouse is over a rectangle
-if is_hovered(x, y, w, h) {
-    // ...
-}
-
-// Check if rectangle was clicked (released)
-if was_clicked(x, y, w, h) {
-    // ...
-}
-
-// Check if rectangle was pressed (down)
-if was_pressed(x, y, w, h) {
-    // ...
-}
-
-// Capture input state
-let input = InputState::capture();
-if input.left_click {
-    // ...
-}
-
-// Keyboard-driven menus: wrap-around cursor + standard key readers
-let mut cursor = MenuCursor::new(options.len());   // keep in state
-cursor.navigate(menu_nav_vertical());              // Up/W, Down/S
-volume += menu_nav_horizontal() as f32 * 0.1;      // Left/A, Right/D
-if input.enter_pressed { activate(options[cursor.index()]); }
-```
-
-### UI (`ui` module)
-
-```rust
-use macroquad_toolkit::ui::*;
-
-// Simple button (triggers on release)
-if button(x, y, w, h, "Click") {
-    // Button was clicked
-}
-
-// Button with custom style
-let style = ButtonStyle::default_dark();
-if button_styled(x, y, w, h, "Custom", &style) {
-    // ...
-}
-
-// Button that triggers on press (instead of release)
-if button_on_press(x, y, w, h, "Press", &style) {
-    // Triggers immediately when mouse down
-}
-
-// Panel with title
-panel(x, y, w, h, Some("Title"));
-
-// Progress bar
-progress_bar(x, y, w, h, current, max, dark::POSITIVE);
-```
-
-### Assets (`assets` module)
-
-```rust
-use macroquad_toolkit::assets::AssetManager;
-
-let mut assets = AssetManager::new();
-
-// Load single texture
-assets.load_texture("player", "assets/player.png").await.ok();
-
-// Get texture
-if let Some(tex) = assets.get_texture("player") {
-    draw_texture(tex, x, y, WHITE);
-}
-```
-
-**JPEG is supported.** Macroquad itself compiles `image` with only the `png` and `tga`
-decoders, so `macroquad::load_texture` fails on `.jpg`. The toolkit adds a JPEG decoder and
-routes every load path (`load_texture`, `load_texture_filtered`, `AssetPack::texture`,
-`load_texture_from_pack_or_file`) through `assets::decode_texture_bytes`, which detects JPEG by
-magic bytes and falls back to Macroquad for everything else. Loose files are detected by
-`.jpg`/`.jpeg` extension.
-
-Prefer JPEG for large opaque art — photographic/painterly backgrounds and maps compress
-10x better than lossless PNG, and PNG-in-ZIP saves nothing because the data is already
-deflate-incompressible. **JPEG has no alpha channel**, so keep anything with transparency
-(sprites, UI chrome, icons) as PNG. Verify with an alpha-channel audit before bulk-converting.
-
-### Camera (`camera` module)
-
-```rust
-use macroquad_toolkit::camera::Camera2D;
-
-let mut camera = Camera2D::new(vec2(0.0, 0.0), 1.0);
-
-// In game loop
-camera.update(get_frame_time(), false);
-
-// Convert coordinates
-let world_pos = camera.screen_to_world(mouse_position().into());
-let screen_pos = camera.world_to_screen(world_pos);
-```
-
-### Events (`events` module)
-
-```rust
-use macroquad_toolkit::events::EventBus;
-
-enum GameEvent {
-    PlayerDied,
-    EnemySpawned,
-}
-
-let mut events = EventBus::new();
-events.push(GameEvent::PlayerDied);
-
-// Process events
-for event in events.drain() {
-    match event {
-        GameEvent::PlayerDied => { /* ... */ }
-        GameEvent::EnemySpawned => { /* ... */ }
-    }
-}
-```
-
-### Colors (`colors` module)
-
-```rust
-use macroquad_toolkit::colors::dark;
-
-clear_background(dark::BACKGROUND);
-draw_rectangle(x, y, w, h, dark::PANEL);
-draw_text("Hello", x, y, 20.0, dark::TEXT);
-```
-
-Available colors:
-- `BACKGROUND`, `PANEL`, `PANEL_HEADER`
-- `TEXT`, `TEXT_BRIGHT`, `TEXT_DIM`
-- `ACCENT`, `POSITIVE`, `WARNING`, `NEGATIVE`
-- `HOVERED`
-
-Color manipulation helpers — do **not** hand-roll `Color::new(c.r, c.g, c.b, a)`
-or per-channel brighten/darken/mix in game code:
-
-```rust
-use macroquad_toolkit::colors::{with_alpha, multiply_alpha, lighten, darken, shade, tint,
-                                mix, shift_hue};
-
-let faded = with_alpha(dark::ACCENT, 0.4);      // replace alpha
-let ghost = multiply_alpha(translucent, 0.5);   // scale existing alpha
-let hover = lighten(base, 0.1);                 // additive per-channel
-let dim = darken(base, 0.15);
-let shadowed = shade(base, 0.3);                // blend toward black (multiplicative)
-let pale = tint(base, 0.3);                     // blend toward white
-let blend = mix(a, b, t);                       // component lerp (alias: lerp_color)
-let variant = shift_hue(base, 40.0);            // HSV hue rotation
-```
-
-### Math (`math` module)
-
-Interpolation and easing primitives — use these instead of private `lerp`/`ease_*` copies:
-
-```rust
-use macroquad_toolkit::math::{lerp, inv_lerp, remap, smoothstep, approach, exp_approach,
-                              ease_out_cubic, ease_out_back, pulse01, pulse_range, bob,
-                              blink, hash_str, Tween};
-
-let x = lerp(a, b, t);
-let glow = pulse_range(3.0, 0.55, 0.77);   // replaces (get_time()*k).sin() idioms
-let caret = if blink(elapsed, 2.5) { "_" } else { "" }; // square-wave cursor blink
-let mut slide = Tween::new(0.0, 8.0);      // exponential ease-toward-target
-slide.set_target(panel_x);
-slide.update(dt);
-let seed = hash_str(&entity_id);           // FNV-1a, stable procedural seeds
-```
-
-### Timing (`timing` module)
-
-Replaces bare `f32` cooldown fields, `accum` tickers, and hand-stepped phase machines:
-
-```rust
-use macroquad_toolkit::timing::{Cooldown, Timer, IntervalTimer, Timeline};
-
-let mut fire = Cooldown::new(0.5);
-if wants_fire && fire.try_trigger() { /* shoot */ }
-fire.tick(dt);
-
-let mut flash = Timer::new(0.3);            // one-shot with 0..1 progress
-let mut spawner = IntervalTimer::new(2.0);  // fires N times per update
-for _ in 0..spawner.tick(dt) { /* spawn */ }
-
-let mut swing = Timeline::new(vec![(Phase::WindUp, 0.2), (Phase::Strike, 0.1)]);
-swing.advance(dt);
-if let Some((phase, progress)) = swing.current() { /* animate */ }
-```
-
-### FX (`fx` module)
-
-```rust
-use macroquad_toolkit::fx::{ScreenShake, ScreenFade, ParticleSystem, BurstConfig, FloatingTextLayer};
-
-let mut shake = ScreenShake::new(12.0);     // trauma model: offset ~ trauma^2
-shake.add_trauma(0.4);
-shake.update(dt);
-let cam_offset = shake.offset();
-
-let mut fade = ScreenFade::new(0.4);        // scene transitions
-fade.fade_out();
-if fade.update(dt) { /* swap scene, then fade.fade_in() */ }
-fade.draw();
-
-let mut particles = ParticleSystem::new();  // capped pool
-particles.spawn_burst(hit_pos, 12, &BurstConfig::default());
-particles.update(dt);
-particles.draw();
-
-let mut floaters = FloatingTextLayer::new(); // damage numbers / gains
-floaters.spawn("+5", world_pos, GOLD);
-floaters.update(dt);
-floaters.draw();                             // inside camera for world anchor
-```
-
-Attack visuals that lerp toward a target and resolve a hit on arrival use
-`ProjectileLayer<T>` — the payload is whatever your game needs to apply the
-impact (serde round-trips for saves):
-
-```rust
-use macroquad_toolkit::fx::{ProjectileLayer, TravelingProjectile};
-
-let mut projectiles: ProjectileLayer<Impact> = ProjectileLayer::new();
-projectiles.spawn(attacker_pos, target_pos, 0.3, Impact { defender, damage });
-projectiles.push(                                     // melee slash: stays near attacker
-    TravelingProjectile::new(a, b, 0.15, impact).with_travel_ratio(0.3),
-);
-for impact in projectiles.update(dt) { apply_damage(impact); }
-for p in projectiles.iter() { draw_at(p.position(), p.progress()); }
-```
-
-Terminal-style character reveal — given the full text, seconds elapsed, and a
-chars-per-second rate, these return how much should be visible (a non-positive
-rate reveals everything, handy for capture/accessibility). Counting is by
-`char`, so multi-byte UTF-8 never splits:
-
-```rust
-use macroquad_toolkit::fx::{typed_prefix, is_fully_typed, prefix_chars, reveal_block};
-
-let shown = typed_prefix(line, elapsed, 40.0);          // one string
-if !is_fully_typed(line, elapsed, 40.0) { /* draw caret */ }
-
-// A whole block streamed as one shared budget (boot log, console output):
-// line N only starts once lines 0..N are fully shown.
-let r = reveal_block(&lines, elapsed, 170.0);
-for (i, line) in lines.iter().enumerate() {
-    draw(prefix_chars(line, r.shown[i]));               // visible prefix per line
-}
-// Park a blinking caret at the write head (or final glyph once complete):
-if i == r.cursor_line && blink(elapsed, 3.0) { draw_caret(); }
-```
-
-### Form widgets, scroll, and tabs (`ui` module)
-
-```rust
-use macroquad_toolkit::ui::{toggle_row, checkbox, slider_row, stepper_row,
-                            segmented_bar, keycap_hint, ScrollArea, tab_bar, nav_column};
-
-toggle_row(row, "Screen shake", &mut settings.screen_shake);
-slider_row(row2, "Music", &mut settings.music_volume, 0.0, 1.0);
-match stepper_row(row3, "UI scale", &format!("{:.0}%", scale * 100.0)) {
-    d if d != 0 => { /* apply step */ }
-    _ => {}
-}
-
-let mut scroll = ScrollArea::new();          // keep in state
-scroll.update(list_rect, content_height);
-// draw rows offset by -scroll.offset(), then:
-scroll.draw_scrollbar(list_rect, content_height);
-
-if let Some(clicked) = tab_bar(bar_rect, &["Stats", "Gear", "Log"], active_tab) {
-    active_tab = clicked;
-}
-```
-
-### Hover tooltips and menu plaques (`ui` module)
-
-`HoverTooltip` adds a show delay and fade-in/out on top of the stateless
-`draw_tooltip`: widgets report hover during drawing, and the owner draws once
-at the end of the frame so the tooltip renders above everything.
-
-```rust
-use macroquad_toolkit::ui::{HoverTooltip, TooltipStyle};
-
-let mut tooltip = HoverTooltip::new();          // keep in UI state
-// While drawing each widget:
-tooltip.hover_rect("forge-btn", "Forge a new blade", btn_rect, mouse, get_time());
-// End of frame (applies fade alpha to the style):
-tooltip.draw(&TooltipStyle::default(), None, get_time());
-```
-
-Plaques are the ornamented title/pause-menu buttons (drop shadow, framed
-face, corner tick marks). `PlaqueStyle` exposes hooks for the parts games
-differ on — bevel band, inner borders, top highlight, mark placement — and
-`PlaquePalette` maps interaction state to face colors, one palette per tone:
-
-```rust
-use macroquad_toolkit::ui::{plaque_button, plaque_button_ex, draw_plaque,
-                            draw_corner_marks, PlaquePalette, PlaqueStyle};
-
-let style = PlaqueStyle::default();             // build once per screen/tone
-let palette = PlaquePalette::default();
-if plaque_button(rect, "New Game", &style, &palette, enabled, logical_mouse) {
-    // activated (released over the button)
-}
-// Keyboard menus: highlight the MenuCursor's row
-plaque_button_ex(rect, "Resume", &style, &palette, true, cursor.index() == i, mouse);
-draw_corner_marks(panel_rect, gold);            // standalone decorations
-```
-
-### Settings (`settings` module)
-
-```rust
-use macroquad_toolkit::settings::GameSettings;
-
-let mut settings = GameSettings::load("my_game");   // defaults when missing
-settings.apply_display();                            // fullscreen + UI text scale
-sound.play_sfx(Sfx::Hit, settings.effective_sfx_volume());
-settings.save("my_game").ok();
-```
-
-### Achievements (`achievements` module)
-
-```rust
-use macroquad_toolkit::achievements::{Achievement, Achievements};
-
-let mut achievements = Achievements::from_definitions(vec![
-    Achievement::new("first_win", "First Win", "Win a run."),
-]);
-if achievements.unlock("first_win") { notifications.success("Achievement: First Win"); }
-let (done, total) = achievements.progress();
-// Serialize into the save; call sync_definitions(defs) after load.
-```
-
-### Debug overlay (`debug` module)
-
-```rust
-use macroquad_toolkit::debug::DebugOverlay;
-
-let mut overlay = DebugOverlay::new();      // keep in Game
-overlay.record_frame(get_frame_time());     // every frame
-if is_key_pressed(KeyCode::F3) { overlay.toggle(); }
-overlay.draw(&[format!("entities: {}", count)]);
-```
-
-Time formatting lives beside the money formatters in `ui`:
-`format_mmss(secs)`, `format_hmmss(secs)`, `format_clock(hour, minute)`.
-
-### RNG (`rng` module)
-
-Two layers: convenience wrappers around `macroquad::rand` (WebGL-safe, shared
-generator) and `SeededRng`, a deterministic xorshift64* generator for
-gameplay. Prefer `SeededRng` for anything that affects simulation outcomes —
-keep it state-owned so runs are reproducible (`CODE_STANDARDS.md`), and use
-the shared-generator helpers only for cosmetic randomness. Do **not** write a
-project-local RNG; games that need one re-export this
-(e.g. `pub use macroquad_toolkit::rng::SeededRng as Rng;`).
-
-```rust
-use macroquad_toolkit::rng::{self, SeededRng};
-
-// Deterministic, state-owned gameplay RNG. Serde-serializable so mid-run
-// state can live in saves.
-let mut rng = SeededRng::new(world_seed);
-let roll = rng.next_u64();          // raw 64 bits
-let t = rng.next_f32();             // [0, 1)
-let speed = rng.range_f32(0.5, 2.0); // [low, high)
-let index = rng.below(items.len()); // [0, n); 0 when n == 0
-if rng.chance(0.25) { /* 25% */ }
-let picked = rng.choose(&items);    // Option<&T>
-
-// Shared-generator helpers (cosmetic randomness only).
-rng::srand(seed);
-let v = rng::gen_range(0, 10);
-let flip = rng::chance(0.5);
-rng::shuffle(&mut deck);
-let one = rng::choose(&palette);
-```
-
-### Sprite (`sprite` module)
-
-```rust
-use macroquad_toolkit::sprite::Sprite;
-
-let sprite = Sprite::new()
-    .with_texture(texture)
-    .at(100.0, 100.0)
-    .scaled(2.0, 2.0)
-    .rotated(0.5)
-    .colored(RED);
-
-sprite.draw();
-```
-
-Per-entity visual diversity from one image: `SpriteVariationCache` recolors
-hue/saturation regions of a base sprite deterministically per seed and caches
-the resulting textures.
-
-```rust
-use macroquad_toolkit::sprite::{ColorRegion, SpriteVariationCache, SpriteVariationConfig};
-
-let mut variations = SpriteVariationCache::new();   // keep in render state
-variations.register("goblin", SpriteVariationConfig {
-    color_regions: vec![
-        ColorRegion::new("skin", 60.0, 150.0, 0.3, 0.8, 0.8),  // green hues
-        ColorRegion::new("cloth", 0.0, 360.0, 0.3, 1.0, 1.5),
-    ],
-    variation_strength: 0.7,
-});
-let texture = variations.get_or_create("goblin", entity.variation_seed, &base_texture);
-```
-
-### Raster (`raster` module)
-
-CPU-side pixel drawing onto an `Image` for procedural art (sprites,
-portraits, generated textures). Everything clips against the image bounds;
-noise is seeded and deterministic.
-
-```rust
-use macroquad_toolkit::raster::{fill_rect, fill_circle, fill_ellipse,
-                                draw_line_pixels, add_noise, set_pixel_safe};
-
-let mut image = Image::gen_image_color(64, 64, BLANK);
-fill_rect(&mut image, 4, 4, 56, 40, wall_color);
-fill_ellipse(&mut image, 32, 50, 20, 8, shadow_color);
-draw_line_pixels(&mut image, 0, 63, 63, 0, trim_color);   // Bresenham
-add_noise(&mut image, seed, 0.15);                        // grain, stable per seed
-let texture = Texture2D::from_image(&image);
-```
-
-### Capture (`capture` module)
-
-Headless screenshot harness: when a `PREFIX_CAPTURE_PATH` env var is set, the
-game boots into a chosen scene, simulates a fixed number of frames at a fixed
-timestep, writes a PNG, and exits. This makes UI changes visually verifiable
-from a script (or by an AI agent reading the PNG back) with no interactive
-input. Full walkthrough and gotchas: `docs/screenshot_capture_harness_guide.md`.
-
-```rust
-use macroquad_toolkit::capture;
-
-fn window_conf() -> Conf {
-    // Reads MYGAME_WINDOW_WIDTH/HEIGHT overrides; disables high_dpi while
-    // capturing so screenshots are pixel-aligned with the logical layout.
-    capture::capture_window_conf("MYGAME", "My Game", 1280, 720)
-}
-
-#[macroquad::main(window_conf)]
-async fn main() {
-    let mut game = Game::new().await;
-
-    if let Some(config) = capture::CaptureConfig::from_env("MYGAME") {
-        game.begin_capture_scene(&config.scene); // your scene-seeding method
-        capture::run_capture(&config, |dt| {
-            game.update(dt);
-            game.draw();
-        })
-        .await;
-        return;
-    }
-
-    loop { /* normal interactive loop */ }
-}
-```
-
-The only per-game code is `begin_capture_scene(&str)` — a method that puts the
-session into a named scene (e.g. `"gameplay"`, `"map"`, `"loadout"`) so the
-capture starts in the state you want to photograph.
-
-Env vars (replace `MYGAME` with your per-game prefix):
-
-- `MYGAME_CAPTURE_PATH` — output PNG path; presence enables capture mode
-- `MYGAME_CAPTURE_SCENE` — scene name (default `gameplay`)
-- `MYGAME_CAPTURE_FRAMES` — frames to simulate before capture (default 150)
-- `MYGAME_WINDOW_WIDTH` / `MYGAME_WINDOW_HEIGHT` — window size override
-- `MYGAME_HEADLESS` — hide the game window (default: on while capturing)
-
-All env access is stubbed out on `wasm32`, so web builds are unaffected.
-
-#### Really headless (`capture::headless`)
-
-macroquad has no offscreen mode — miniquad must create a real OS window to own
-the GL context and shows it as soon as that context exists — so a capture used
-to pop a full game window onto the desktop and take focus. `capture::headless`
-takes that window straight back off the desktop (`ShowWindow(SW_HIDE)` on
-Windows; a no-op elsewhere). Rendering is unaffected: the frame still lands in
-the back buffer, which the driver owns whether or not the window is mapped, and
-`get_screen_data()` reads the back buffer *before* the swap.
-
-`capture_window_conf` calls `headless::arm(prefix)` for you, so a game wired the
-standard way needs no change. `window_conf()` is the earliest hook a game has,
-and `arm` leaves a watcher behind that hides the window the moment miniquad
-shows it — so there is no visible flash while the game loads. A game that
-builds its `Conf` by hand should call `headless::arm("MYGAME")` there itself:
-
-```rust
-fn window_conf() -> Conf {
-    capture::headless::arm("MYGAME");
-    Conf { /* hand-built */ }
-}
-```
-
-`MYGAME_HEADLESS` defaults to whether capture mode is active, and overrides it
-either way:
-
-- `MYGAME_HEADLESS=0` during a capture — show the window, to watch a scene that
-  is coming out wrong (`capture_ui.ps1 -Visible` sets this)
-- `MYGAME_HEADLESS=1` outside capture mode — hide the window for any other
-  automated run, e.g. a playtest bot driving itself through a headless session
-
-A shared wrapper script (`macroquad-toolkit/scripts/capture_ui.ps1`) builds the
-game, runs one capture per scene, and sanity-checks each PNG. It derives the
-package name, exe path, and env prefix from `cargo metadata`, so from a game
-directory it needs no arguments:
+# Macroquad Toolkit: modules and integration
+
+This guide describes the API exported by [src/lib.rs](src/lib.rs). Use
+[README.md](README.md) for dependencies and validation, and the linked source
+modules/Rustdoc for signatures rather than copying partial game skeletons.
+
+## Ownership and architecture
+
+A consuming game owns its main loop, typed content schemas, simulation, state
+transitions, asset paths and save migrations. Keep rendering separate from state
+updates where practical: UI returns an intent, and the owning state applies it.
+Use the toolkit for reusable runtime, input, rendering and platform behavior.
+Game balance and authored content belong in game data; generic JSON loading
+belongs in `data_loader`.
+
+For authoritative multiplayer, the server owns validation, simulation time,
+shared state and durable persistence. The client displays projections and sends
+commands. Protocol types can live in a shared protocol crate. The transport here
+does not provide a server, authentication policy or database schema.
+
+## Module index
+
+All modules below are available without optional features unless marked.
+
+| Area | Modules and responsibilities |
+| --- | --- |
+| UI | [ui](src/ui.rs): bounded text, font, formatting, layout, pointer widgets, surfaces, forms, scrolling, tabs, tooltips, plaques, contrast and scaling |
+| Input | [input](src/input.rs): hit targets, device capture, gestures, action bindings and remapping |
+| Cameras | [camera](src/camera.rs): interactive 2D camera, pure viewport transforms and settings-aware control |
+| Rendering | [sprite](src/sprite.rs): sprites, uniform atlases and variations; [render3d](src/render3d/mod.rs): billboards, cameras and picking |
+| Assets | [assets](src/assets.rs): textures, fonts, ZIP packs, manifests and chroma helpers; [artwork](src/artwork.rs): optional reference pack |
+| Color and procedural images | [colors](src/colors.rs), [raster](src/raster.rs), [noise](src/noise.rs), [paint](src/paint.rs) |
+| Outcome presentation | [reveal](src/reveal.rs): count-ups and staged reveals; [strip](src/strip.rs): deterministic decided-stop reel animation |
+| Motion and time | [math](src/math.rs): interpolation/easing; [timing](src/timing.rs): timers/timelines; [fx](src/fx.rs): shake, fades, particles, floating text, travel, typewriter and CRT effects |
+| World data | [grid](src/grid.rs): grids, coordinates, fog and vision; [pathfinding](src/pathfinding.rs): A* and caching; [entities](src/entities.rs): entity storage |
+| Game services | [states](src/states.rs), [events](src/events.rs), [rng](src/rng.rs), [notifications](src/notifications.rs), [achievements](src/achievements.rs) |
+| Audio | [audio](src/audio.rs): playback and settings routing; [synth](src/synth.rs): sound synthesis; [score](src/score.rs): musical composition for synthesis |
+| Data and saves | [data_loader](src/data_loader.rs), [persistence](src/persistence.rs); [wasm_storage](src/wasm_storage.rs) is WASM-only |
+| Preferences and diagnostics | [settings](src/settings.rs), [debug](src/debug.rs), [crash](src/crash.rs), [series](src/series.rs) |
+| Verification | [capture](src/capture.rs): deterministic screenshots; [source_gate](src/source_gate.rs): Rust source line-count checks |
+| Optional services | [net](src/net.rs) (`net`), [analytics](src/analytics.rs) (`analytics`), [db](src/db.rs) (`db`, native only) |
+
+`prelude` re-exports common 2D helpers, `prelude_3d` exports entities/grid/3D
+helpers, and `prelude_data` exports data loading and persistence. Feature-gated
+`prelude_net` and `prelude_analytics` expose the corresponding clients. Explicit
+imports avoid ambiguity with Macroquad names such as `Camera2D`.
+
+## Data loading
+
+Use `parse_json_labeled` for JSON text with a meaningful source name, or
+`load_embedded_json_labeled` for embedded data. `include_json_str!` embeds text;
+`include_json!` embeds and parses it with a path label. Macro paths resolve
+relative to the invoking Rust source. Games own types and content validation.
+
+`load_json_file` asynchronously loads required runtime data on native/WASM.
+The synchronous runtime loader is native-only in behavior: on WASM it cannot
+read runtime files. For explicit embedded fallbacks use
+`load_json_file_with_fallback` or `load_json_file_with_fallback_sync` and choose
+`JsonFallbackPolicy::ReadError` (read failure only) or `ReadOrParseError` (also
+malformed runtime content). The synchronous fallback path uses embedded data on
+WASM. Invalid fallback JSON remains an error. Candidate-path loading via
+`load_json_with_fallback_sync` rejects an existing unreadable or malformed candidate.
+
+`DataRegistry::from_embedded_arrays` merges arrays in authored order with
+caller-selected IDs. `overlay_json_directories` reads sorted JSON files from the
+first readable native directory and reports invalid files; it is a no-op in
+browsers. Use `into_map` for game-owned validation and simulation.
+
+## UI, text and input
+
+Every label, button, panel, card, tooltip and status area needs a width and height
+budget. Wrap, shrink or truncate before text can overlap neighbors:
+
+- `draw_text_centered_in_box` for button labels, titles and centered captions.
+- `draw_text_block` for paragraphs; `wrap_text` and `fit_text_to_box` for layout.
+- `truncate_text_to_width` for single-line labels.
+
+`button`, `button_styled` and `button_on_release` test release over the target;
+`button_on_press` tests press over the target. Release-over behavior is not a
+promise that a press originated inside the target. `is_hovered`, `was_clicked`
+and `was_pressed` provide low-level rectangle checks. `Pointer` and explicit
+coordinate mapping support scaled UI; action maps connect visible controls,
+keyboard and gamepads. See [settings integration](docs/SETTINGS.md) for routing,
+rebinding and gestures. Every required game action needs a visible tap target or
+an explicit direct-touch gesture; shortcuts are supplemental.
+
+`GameSettings::ui_scale` is 75–200%, default 100%, independently of text scaling.
+Apply it with `apply_display` or `ui::set_ui_scale`. Create
+`VirtualUi::responsive()` each frame and reflow against its logical dimensions.
+It fills the window: smaller scales expose more layout space, larger scales
+require reflow or scrolling. `VirtualUi::scaled(min_width, min_height)` can reduce
+the requested scale to fit minimum logical dimensions. Pair `begin()` with
+`screen_to_ui()` and restore the default camera with `end_virtual_ui_frame()`.
+Use a separate world camera. `draw_notifications_in_viewport` accepts the same UI
+bounds. See [shared settings](docs/SETTINGS.md) for safe display previews.
+
+## Cameras
+
+`CameraTransform` is a pure logical-pixel transform. Supply an explicit `Rect`
+viewport to `screen_to_world`, `world_to_screen` and `zoom_at`; offsets are part
+of the transform. `pan_screen` follows a drag and `zoom_at` preserves the anchor
+world point even at zoom limits. Invalid inputs are rejected.
+
+`constrain` supports `CameraBoundsPolicy::TargetInside` and `KeepVisible { pixels }`.
+Apply bounds after movement; constraints may move the zoom anchor. `apply_gesture`
+consumes claimed `TouchGesture` frames, leaving taps for controls. `Camera2D`'s
+`transform` and `set_transform` bridge to the interactive camera. Games retain
+input routing, projection, selection and saved schemas.
+
+Use `CameraController::update_2d` for shared settings/action integration; do not
+also call `Camera2D::update` in that frame. The latter remains available for
+callers managing their own controls.
+
+## Assets, sprites and audio
+
+`AssetManager` caches named textures and fonts. Texture manifests use a
+`textures` array of `key`, `path` and optional `filter` entries. Loading returns
+counts; handle errors and check required keys instead of assuming every texture
+loaded. ZIP packs preserve normal asset paths, for example
+`assets/tiles/tile_01.png`. Register a placeholder explicitly with
+`set_placeholder_texture` or `set_placeholder_texture_direct`; the reference
+missing-texture image is not installed automatically.
+
+PNG/TGA decoding comes through Macroquad; this crate additionally enables JPEG.
+Use PNG for alpha and pixel art. Set nearest/linear filtering deliberately.
+`SpriteAtlas` uses uniform cells rather than packed-atlas metadata. See
+[artwork requirements](docs/ARTWORK.md) for the reference pack and art delivery.
+
+`SoundManager` loads sounds by caller-defined IDs, plays effects with `play_sfx`
+and routes music/voice/UI/ambience with `play_group`. Use `apply_settings` with
+real host focus state for master/group volume and focus muting. Audio routing,
+reduced motion and autosave integration are covered in [SETTINGS.md](docs/SETTINGS.md).
+
+## Saves and compatibility
+
+Use `save_to_slot`/`load_from_slot` for slots and `save_json_key`/`load_json_key`
+for named JSON values. Native backends use files; WASM uses localStorage through
+the `sapp-jsutils` storage plugin. Native-only `save_json`/`load_json` accept file
+paths. Propagate errors and keep recovery visible. `AutoSaveManager` schedules
+attempts; games still own serialization and safe save points.
+
+Versioned slot APIs and `load_json_key_with_migration` let games supply migration
+logic. Configured key APIs (`save_json_key_configured`, `load_json_key_configured`,
+`json_key_exists_configured`) accept an optional environment-variable name for a
+complete native save path, useful for isolated restart checks. Browser storage
+continues using the qualified key.
+
+`BackupChain::with_generations("campaign", 3)` uses `campaign_backup`,
+`campaign_backup_2` and `campaign_backup_3`; `new` accepts explicit names.
+`KeySaveStore` adapts qualified keys, `FileSaveStore` native paths, and
+`RawSaveStore` custom/in-memory backends. Validate schema/version before saving:
+an invalid primary must be explicitly resolved first. Rotation preserves raw
+bytes, skips invalid backups, and writes oldest-first and primary-last. Failed
+writes may leave partial backup rotation; primary preservation depends on the
+backend's single-key atomic-write contract. Serialize concurrent writers.
+`recover` returns the decoded value, `SaveSource` and rejected candidates without
+writing automatically.
+
+The currently supported `load_json_key_with_legacy` API imports explicitly
+allowlisted raw browser keys only when the qualified key is absent. Validate
+both current and imported data; a corrupt/future primary blocks import. It
+preserves old keys, reports failed writes and exposes `LegacySource`. Native
+builds ignore browser aliases. `load_with_legacy_keys` offers the same policy for
+`RawSaveStore`. These are compatibility tools for existing saves, not automatic
+key discovery or deletion.
+
+For new deterministic simulations use state-owned `SeededRng`, persisting and
+restoring its state. `LegacyLcg64<INCREMENT>` is a supported compatibility stream
+for games whose saves depend on that sequence. Keep game-specific seed mixing,
+range mapping and random draw order in the game; switching generators changes
+replays. Global RNG helpers are available for callers that do not need isolated
+streams.
+
+## Optional services
+
+With `net`, retain the `Pending<T>` returned by `HttpClient` and call
+`poll_timed(dt, timeout)` once per frame. Native requests use background threads;
+WASM uses `quad-net.js`. The toolkit handles headers, JSON and transport timeouts.
+Games own retry cooldowns, sessions, authentication, endpoint types and CORS.
+Retain the last safe projection and expose connection failures in the game UI.
+
+With `analytics`, create one `AnalyticsClient`, call `update(dt, is_active)` each
+frame and report sparse milestones or the dedicated completion/store-click
+events. It owns anonymous IDs, launch sessions, active-time heartbeats, batching
+and retries. Games own collection/consent policy and when the client is created;
+telemetry failures must not interrupt gameplay.
+
+With native-only `db`, `Database::new` opens SQLite, `run_raw_migrations` executes
+supplied statements sequentially, and `pool` exposes SQLx. The helper is not a
+versioned migration framework or an automatic transaction around the batch.
+
+## Screenshot capture
+
+The [Windows wrapper](scripts/capture_ui.ps1) builds a consuming game's executable
+and runs all requested scenes in one process/window. The game must read
+`CaptureConfig::all_from_env(prefix)`, seed each scene, await `run_capture_once`
+for it, then return after the batch. Use `capture_window_conf` at startup to apply
+capture dimensions and arm Windows window hiding. No capture mode is enabled on
+WASM, and hiding still requires a native graphics context.
+
+The manifest named by `PREFIX_CAPTURE_MANIFEST` contains one `scene<TAB>path` row
+per capture. Frames default to 150 at a deterministic 1/60-second timestep.
+`PREFIX_CAPTURE_FRAMES`, `PREFIX_CAPTURE_MIN_FRAME_MS`, `PREFIX_WINDOW_WIDTH`,
+`PREFIX_WINDOW_HEIGHT`, `PREFIX_CAPTURE_FULLSCREEN` and `PREFIX_HEADLESS` control
+the run. There is no single-path capture environment API.
+
+From a consuming game's directory, when a capture is requested:
 
 ```powershell
 & ..\macroquad-toolkit\scripts\capture_ui.ps1 -Scenes gameplay,map
 & ..\macroquad-toolkit\scripts\capture_ui.ps1 -Scenes gameplay -SkipBuild
 ```
 
-Pass `-Prefix` if the game's env-var prefix differs from its package name
-(e.g. `carriage_run` uses `CARRIAGE`). See `carriage_run` for a reference
-integration, including a thin per-game `scripts/capture_ui.ps1` wrapper.
+Use the game's actual scene names. The script derives the package, target path
+and uppercase underscore-separated prefix from Cargo metadata. Override `-Prefix`
+or `-ExeName` when necessary. `-GameDir` selects a game; this library itself has
+no executable for the wrapper. Images replace `docs/verification/ui_<scene>.png`.
+Use `-Release` for optimized builds; `-Visible` explicitly shows the game window.
 
-### Source gate (`source_gate` module)
+`-ExecutablePath <path> -SkipBuild` checks an existing packaged binary.
+`-Fullscreen` requests the monitor-sized framebuffer. `-MinFrameMilliseconds`
+sets a minimum wall-clock frame duration without changing simulation time.
+`-ProcessReportPath <path>` writes scene/surface/timing metadata, sampled working
+set distribution and OS peak memory. `-SampleWindowsGpuCounters` adds optional
+GPU memory and 3D utilization samples; the report distinguishes sampled,
+unavailable and not-requested counters and imposes no GPU threshold. These
+captures supplement the consuming game's required publisher validation.
 
-The 800-line hard limit from `CODE_STANDARDS.md` §2.2 as a test, so plain
-`cargo test` enforces it locally and in CI. It counts non-test lines only:
-inline `#[cfg(test)] mod tests` blocks don't count, and extracted test files
-(`foo/tests.rs`, anything under a `tests/` directory inside `src/`) are exempt.
-Blank lines and comments in non-test code do count.
+## Source gate
 
-Every game carries the same one-test integration file:
+`source_gate::assert_source_files_within_limit(env!("CARGO_MANIFEST_DIR"), &[])`
+checks all `.rs` files below the project directory, excluding `.git` and build
+`target` directories. It counts every physical line, including test sources,
+examples, build scripts, comments and whitespace. The limit is 800. Missing
+project directories fail. Add the call to a test; the toolkit tests itself.
 
-```rust
-// tests/code_standards.rs
-#[test]
-fn source_files_stay_under_the_limit() {
-    macroquad_toolkit::source_gate::assert_source_files_within_limit(
-        env!("CARGO_MANIFEST_DIR"),
-        &[],
-    );
-}
-```
-
-Files already over the limit when the gate arrives are grandfathered by
-listing their manifest-relative paths (forward slashes) in the second
-argument. Grandfathered entries are ratcheted: when a listed file drops back
-under the limit, the gate fails until the entry is removed, so the list only
-shrinks. The gate also panics — rather than passing clean — if the path it is
-given has no `src/`.
-
-Sibling crates in the same repo can be gated from the one test file by
-passing their directories too, e.g.
-`assert_source_files_within_limit(concat!(env!("CARGO_MANIFEST_DIR"), "/kaiju_server"), &[])`.
-
-## Button Click Semantics
-
-The toolkit provides two button variants to handle different click behaviors:
-
-- **`button()` and `button_on_release()`**: Fire when mouse button is **released** over the button. This is the safer default as it prevents accidental double-clicks and allows users to move the mouse away to cancel.
-
-- **`button_on_press()`**: Fires when mouse button is **pressed down** over the button. Use this for instant feedback scenarios.
-
-## License
-
-This toolkit is extracted from game projects and shared for reuse across multiple games.
+The API retains an exception-list parameter for compatibility, but repository
+policy requires an empty list and splitting oversized files by responsibility.
+Unit tests belong in separate child files as specified in
+[CODE_STANDARDS.md](CODE_STANDARDS.md#113-test-placement).

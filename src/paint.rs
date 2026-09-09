@@ -30,7 +30,7 @@ use macroquad::prelude::*;
 
 /// The primitives the symbol art is built from.
 ///
-/// Coordinates are already in pixels — the normalising is [`Canvas`]'s job, so
+/// Coordinates are already in pixels — the caller owns coordinate mapping, so
 /// an implementation only has to know how to fill a shape.
 pub trait Painter {
     fn tri(&mut self, a: Vec2, b: Vec2, c: Vec2, color: Color);

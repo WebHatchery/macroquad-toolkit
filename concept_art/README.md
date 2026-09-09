@@ -4,6 +4,10 @@ This is a non-runtime concept-art set for the toolkit's neutral reference world:
 a teal-and-amber science-fiction archive explored by an archivist and her small
 service drone.
 
+These images are visual references, not captures of a running game or a promise
+of toolkit gameplay. The runtime pack and delivery requirements are documented
+in [Toolkit artwork](../docs/ARTWORK.md).
+
 ## Direction
 
 - Quiet, reverent exploration rather than combat-first science fiction.
@@ -13,9 +17,9 @@ service drone.
 
 ## Images
 
-- `archivist_vault_key_art.png` — refined 16:9 title-screen mood piece.
-- `archive_chamber_environment.png` — 16:9 environment and level-layout reference.
-- `archivist_drone_design_sheet.png` — protagonist clothing, face, and drone design sheet.
+- [archivist_vault_key_art.png](archivist_vault_key_art.png) — refined 16:9 title-screen mood piece.
+- [archive_chamber_environment.png](archive_chamber_environment.png) — 16:9 environment and level-layout reference.
+- [archivist_drone_design_sheet.png](archivist_drone_design_sheet.png) — protagonist clothing, face, and drone design sheet.
 
 ## Provenance
 

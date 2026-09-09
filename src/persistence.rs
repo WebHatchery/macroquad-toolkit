@@ -2,7 +2,7 @@
 //!
 //! Provides multiple storage backends:
 //! - Native: JSON files on the filesystem
-//! - WASM: web-sys localStorage
+//! - WASM: localStorage through the sapp-jsutils storage plugin
 //!
 //! # Example (Native)
 //! ```no_run

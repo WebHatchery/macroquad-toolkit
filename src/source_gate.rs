@@ -17,11 +17,10 @@
 //! }
 //! ```
 //!
-//! Files already over the limit when the gate arrives go in the second
-//! argument as paths relative to the manifest dir (forward slashes, e.g.
-//! `"src/sim.rs"`). A grandfathered file is tolerated but ratcheted: once it
-//! drops back under the limit the gate fails until its entry is removed, so
-//! the list can only shrink.
+//! The second argument retains support for caller-supplied exceptions, but
+//! repository policy requires an empty list. Split oversized sources instead.
+//! For existing callers using exceptions, an entry becomes an error once its
+//! file falls within the limit.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -93,7 +92,8 @@ pub fn oversized_files(manifest_dir: impl AsRef<Path>, limit: usize) -> Vec<Over
     over
 }
 
-/// The gate: panics if any file under `<manifest_dir>/src` exceeds
+/// The gate: panics if any Rust file under `<manifest_dir>` (excluding `.git`
+/// and `target` directories) exceeds
 /// [`HARD_LIMIT`] total lines, or if a `grandfathered` entry is no longer
 /// over the limit (remove it — the list only shrinks).
 pub fn assert_source_files_within_limit(manifest_dir: impl AsRef<Path>, grandfathered: &[&str]) {

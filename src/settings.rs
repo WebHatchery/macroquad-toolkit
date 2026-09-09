@@ -61,7 +61,7 @@ pub fn reduced_motion_enabled() -> bool {
 pub struct GameSettings {
     pub controls: crate::input::controls::ControlSettings,
     pub camera: crate::camera::CameraPreferences,
-    /// Master volume in `[0, 1]`, multiplied into both groups.
+    /// Master volume in `[0, 1]`, multiplied into every managed audio group.
     pub master_volume: f32,
     /// Sound-effect group volume in `[0, 1]`.
     pub sfx_volume: f32,
@@ -79,7 +79,7 @@ pub struct GameSettings {
     /// Multiplier fed to the toolkit UI text scaling on
     /// [`apply_display`](Self::apply_display).
     pub ui_text_scale: f32,
-    /// Whole-interface scale for responsive `VirtualUi::scaled` layouts.
+    /// Whole-interface scale for responsive `VirtualUi` layouts.
     pub ui_scale: f32,
     /// Autosave cadence in seconds. Games that autosave on a timer read this
     /// instead of a hardcoded/config interval so players can tune it; clamped
@@ -173,7 +173,7 @@ impl GameSettings {
     }
 
     /// Applies display-affecting settings: window fullscreen state and the
-    /// toolkit UI text scale. Call once at startup and after edits.
+    /// toolkit UI/text scales, plus effect preferences. Call at startup and after edits.
     pub fn apply_display(&self) {
         set_fullscreen(self.fullscreen);
         set_ui_text_scale(self.ui_text_scale);

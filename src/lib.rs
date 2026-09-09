@@ -48,7 +48,7 @@
 //! - [`source_gate`] - 800-line source-file gate (CODE_STANDARDS §2.2) run under `cargo test`
 //! - [`db`] - Database support (optional, requires `db` feature)
 
-// Core 2D modules (existing)
+// Shared runtime and rendering modules.
 pub mod achievements;
 #[cfg(feature = "analytics")]
 pub mod analytics;
@@ -82,7 +82,7 @@ pub mod synth;
 pub mod timing;
 pub mod ui;
 
-// New modules extracted from dungeon_manager
+// Data, world and persistence modules.
 pub mod data_loader;
 pub mod entities;
 pub mod grid;

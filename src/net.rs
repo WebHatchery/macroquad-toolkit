@@ -190,8 +190,8 @@ fn format_http_error(label: &str, error: HttpError) -> String {
 
 /// A configured HTTP client for one game server or gateway.
 ///
-/// Headers are copied onto every request. Games can use [`set_header`] for
-/// protocol-specific session identifiers and [`set_bearer_token`] for a
+/// Headers are copied onto every request. Games can use [`Self::set_header`] for
+/// protocol-specific session identifiers and [`Self::set_bearer_token`] for a
 /// conventional account token. Endpoint paths remain game-owned.
 pub struct HttpClient {
     base_url: String,

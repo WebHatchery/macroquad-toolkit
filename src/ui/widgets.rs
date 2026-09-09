@@ -302,7 +302,7 @@ pub fn button_on_press(x: f32, y: f32, w: f32, h: f32, text: &str, style: &Butto
 
 /// Draw a button that triggers on mouse release (button up).
 /// Returns true when mouse button is released over the button.
-/// This is the safer default as it prevents accidental double-clicks.
+/// The press need not originate inside the button; each release is independent.
 pub fn button_on_release(x: f32, y: f32, w: f32, h: f32, text: &str, style: &ButtonStyle) -> bool {
     let hovered = is_hovered(x, y, w, h);
     let is_pressed = hovered && is_mouse_button_down(MouseButton::Left);
