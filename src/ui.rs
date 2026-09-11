@@ -1,8 +1,8 @@
 //! UI rendering utilities for buttons, panels, and progress bars
 
 mod bounds;
-mod contrast;
 mod clip;
+mod contrast;
 mod font;
 mod format;
 mod forms;
