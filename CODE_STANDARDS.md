@@ -19,7 +19,8 @@ consumers before removing or changing a public contract.
 ### 2.1 Responsibilities
 
 `src/lib.rs` declares public modules and preludes. Each module owns one reusable
-responsibility, with child modules for implementation details and tests.
+responsibility, with child modules for implementation details. Tests and
+test-only helpers belong in the crate's `tests/` directory.
 `examples/shared_settings.rs` owns its example's main loop. The library does not
 have a `main.rs` or central game state. Stateful types own their mutations; keep
 pure calculations and rendering separate where practical.
@@ -118,36 +119,31 @@ visible. Explain intentional lint allowances. Avoid confusing variable shadowing
 Remove unused private fields rather than hiding them with underscore prefixes;
 unused parameters required by a trait/API can use an underscore prefix.
 
-## 11. Tests
+## 11. Testing Guidelines
 
-### 11.1 Coverage
+### 11.1 What to Test
+Focus tests on:
+- Core game calculations
+- State machine transitions
+- JSON data loading
+- UI and rendering generally do not need unit tests.
 
-Test calculations, state transitions, serialization, fallback/recovery and
-platform-independent input/layout behavior. Rendering helpers with pure or
-CPU-side paths can have meaningful tests. GPU, browser and hardware behavior
-needs corresponding integration/visual verification; a compile check is not
-proof of interaction behavior.
+### 11.2 Test Style
+- Tests should read like rules
+- Avoid complex setups
+- If a test is hard to write, the code is probably too tangled.
 
-### 11.2 Style
+### 11.3 Feature Test Target
+- Strongly target no more than five `#[test]` cases per major feature: one cohesive responsibility, regardless of how its tests are split or named.
+- Prefer high-value behavior and regression tests. Consolidate related inputs with table-driven assertions; do not bundle unrelated checks or delete useful coverage to meet the target.
+- Before committing, review affected feature suites. If more than five cases are needed, briefly explain why distinct coverage warrants them.
 
-Tests should express observable rules and failure cases, with small deterministic
-fixtures. Avoid tests that simply mirror implementation details.
-
-### 11.3 Test placement
-
-Unit tests always live in separate child files, never inline module bodies:
-
-```rust
-// In src/foo.rs; implementation goes in src/foo/tests.rs.
-#[cfg(test)]
-mod tests;
-```
-
-This preserves `use super::*` and private-item access. Split larger suites into
-focused child files; every test source also has the 800-total-line limit.
-Crate-root `tests/` is for actual integration tests of the public API, not a
-place to move private unit tests. The toolkit's source gate runs in its own test
-suite with an empty exception list.
+### 11.4 Test Placement
+- Each crate owns a `tests/` directory beside its `Cargo.toml`, including member crates in multi-crate repositories. Keep all tests and test-only helpers there.
+- Do not add `#[cfg(test)]`, `mod tests`, test helpers, or test source files under `src/`.
+- Tests exercise the crate's public API. For a binary-only game, expose testable logic through `src/lib.rs` and have `main.rs` use that library; keep internals private unless an intentional public seam is needed.
+- Existing `src/**/tests.rs` files are legacy migration work. Migrate them as a separate change before expanding coverage.
+- Split large suites by responsibility while preserving the feature target (§11.3) and file-size rule (§2.2).
 
 ## 12. Verification artifacts
 

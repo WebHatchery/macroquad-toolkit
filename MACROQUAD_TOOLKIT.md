@@ -236,5 +236,7 @@ project directories fail. Add the call to a test; the toolkit tests itself.
 
 The API retains an exception-list parameter for compatibility, but repository
 policy requires an empty list and splitting oversized files by responsibility.
-Unit tests belong in separate child files as specified in
-[CODE_STANDARDS.md](CODE_STANDARDS.md#113-test-placement).
+All tests and test-only helpers belong in the crate's `tests/` directory and
+exercise its public API, as specified in
+[CODE_STANDARDS.md](CODE_STANDARDS.md#114-test-placement). Review the five-case
+feature target across related suites before committing (§11.3).

@@ -40,8 +40,10 @@ Use [MACROQUAD_TOOLKIT.md](MACROQUAD_TOOLKIT.md) as the integration guide and
 
 ## Testing And Validation
 
-- Store unit tests in separate child files, never inline in implementation files. Use `#[cfg(test)] mod tests;` in `foo.rs` with the tests in `foo/tests.rs` so `use super::*` and private-item access continue to work. See `CODE_STANDARDS.md` §11.3.
-- Keep every test `.rs` file at or below 800 total lines. Split larger test suites into focused child modules before they reach the limit.
+- Keep all tests and test-only helpers in the crate's `tests/` directory, exercising its public API. Do not add test modules, `#[cfg(test)]`, or test helpers under `src/`; migrate existing source-tree tests separately before expanding coverage. See `CODE_STANDARDS.md` §11.4.
+- Strongly target no more than five `#[test]` cases per major feature across all its files. Preserve useful regression coverage, use tables for related inputs, and explain distinct coverage that warrants exceeding the target before committing (§11.3).
+- Focus on calculations, state transitions, and JSON loading with simple tests that read like rules. UI and rendering generally do not need unit tests.
+- Keep every test `.rs` file at or below 800 total lines. Split large suites by responsibility while preserving the feature target.
 - Use each project's `publish.ps1` script as the validation path.
 - Do not treat running a local instance or local dev server as the required test path unless the user explicitly asks for it.
 - After meaningful changes, run `.\publish.ps1` with no parameters from the affected project directory and report whether it passes.

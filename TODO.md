@@ -7,10 +7,12 @@ entry when its verification is complete.
 
 ## Compliance and structure
 
-- [ ] Move the inline test modules in `src/crash.rs`, `src/noise.rs`, and
-  `src/persistence/slots.rs` into `tests.rs` child files. Leave only the
-  `#[cfg(test)] mod tests;` declarations in implementation files, as required
-  by `CODE_STANDARDS.md` §11.3.
+- [ ] Migrate all existing source-tree tests and test-only helpers to the
+  crate's `tests/` directory through its public API. Remove their source-tree
+  module declarations in that separate migration before expanding coverage
+  (`CODE_STANDARDS.md` §11.4). Review each feature across files against the
+  five-case target; preserve valuable regressions and explain necessary excess
+  coverage (§11.3).
 - [ ] Migrate `src/render3d/mod.rs` to the named module layout
   (`src/render3d.rs` with `src/render3d/{billboard,camera,picking}.rs`), then
   update the module-guide link and any consumer imports. Do this when the
@@ -21,13 +23,14 @@ entry when its verification is complete.
   group is `src/assets.rs` (495), `src/ui/surfaces.rs` (483),
   `src/ui/pointer.rs` (480), and `src/persistence/slots.rs` (473). Keep every
   resulting `.rs` file below 800 lines and move toward the 200–400 line target.
-- [ ] Add a structural source check for inline `#[cfg(test)] mod ... {}` bodies,
+- [ ] After the separate test migration, add a structural source check under
+  `tests/` for test modules, test-only helpers, and `#[cfg(test)]` under `src/`,
   newly added `mod.rs` roots, and files approaching the 600-line review
   threshold so these rules do not depend on a manual audit.
 - [ ] Explain every intentional `#[allow(...)]` at
   `src/pathfinding/search.rs`, `src/ui/font/text.rs`, `src/ui/widgets.rs`,
-  `src/persistence/slots.rs`, and the test-only allowance in
-  `src/ui/bounds/tests.rs`, or remove the allowance by changing the design.
+  `src/persistence/slots.rs`, and any test-only allowances after their migration
+  to `tests/`, or remove the allowance by changing the design.
 
 ## UI, input, and accessibility
 
