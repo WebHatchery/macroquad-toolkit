@@ -125,8 +125,15 @@ if ($GpuSampleIntervalMilliseconds -lt 100 -or $GpuSampleIntervalMilliseconds -g
     throw "GpuSampleIntervalMilliseconds must be between 100 and 5000."
 }
 
+$GameDir = (Resolve-Path -LiteralPath $GameDir).Path
+$poolModule = Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'rust_management/scripts/cargo-pool.psm1'
+$captureLease = $null
 Push-Location $GameDir
 try {
+    if ((Test-Path -LiteralPath $poolModule) -and -not $ExecutablePath) {
+        Import-Module $poolModule
+        $captureLease = Enter-RustGameBuildPool -ProjectRoot $GameDir -Purpose capture -ReuseLast:$SkipBuild
+    }
     $metadata = cargo metadata --no-deps --format-version 1 | ConvertFrom-Json
     # In a workspace, metadata lists every member; pick the one that owns GameDir.
     $manifest = (Resolve-Path (Join-Path $GameDir "Cargo.toml")).Path
@@ -147,8 +154,13 @@ try {
 
     if (-not $SkipBuild) {
         Write-Host "Building $($package.name) ($profileDir)..."
-        if ($Release) { cargo build --release } else { cargo build }
+        if ($captureLease) {
+            $buildArgs = @('build')
+            if ($Release) { $buildArgs += '--release' }
+            Invoke-RustGameCargo -Arguments $buildArgs
+        } elseif ($Release) { cargo build --release } else { cargo build }
         if ($LASTEXITCODE -ne 0) { throw "cargo build failed." }
+        if ($captureLease) { Save-RustGameBuildLocation $captureLease }
     }
     if (-not (Test-Path -LiteralPath $exe)) { throw "Missing executable: $exe" }
 
@@ -337,5 +349,6 @@ try {
     }
 }
 finally {
+    if ($captureLease) { Exit-RustGameBuildPool $captureLease }
     Pop-Location
 }

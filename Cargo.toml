@@ -11,7 +11,7 @@ net = ["dep:quad-net"]
 analytics = ["net"]
 
 [dependencies]
-macroquad = "0.4"
+macroquad = "=0.4.16"
 # macroquad pins `image` to png+tga only, so JPEG assets cannot be decoded by
 # `load_texture`. Same version as macroquad's so Cargo unifies it to one copy;
 # no rayon (the `jpeg_rayon` feature) so wasm builds stay single-threaded.

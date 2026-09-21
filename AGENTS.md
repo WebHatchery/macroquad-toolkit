@@ -70,3 +70,11 @@ Use [MACROQUAD_TOOLKIT.md](MACROQUAD_TOOLKIT.md) as the integration guide and
 - Do not preserve the limit by stripping useful spacing, compressing formatting, moving a single small function, or making other cosmetic line-count changes.
 - If a meaningful change would push a file over the limit, extract a cohesive responsibility into one or more nearby modules before or alongside the change.
 - If any file is already over 800 lines, make the restructure part of the current task before considering the task complete.
+
+## Concurrent workspace builds
+
+Use `..\rust_management\cargo.ps1` for local builds, checks, tests and Clippy.
+The shared capture wrapper acquires the same pool automatically. Do not create
+per-game target directories or change workspace membership to avoid a lock.
+Macroquad must remain pinned to the catalog version `=0.4.16`; see
+`rust_management/docs/CARGO_WORKSPACE.md` for pool and sccache setup.
