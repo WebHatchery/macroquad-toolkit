@@ -37,6 +37,13 @@ own the text and draw the returned keys in their own style; edits apply through
 the action dispatcher. Every key is at least 48 logical pixels. The optional
 physical-input reader drains stale typing while the editor is unfocused.
 
+Games using explicit fonts can call `ui::prepare_font_text` once per font before
+visible drawing. Pass the actual text and font sizes for new names, current
+messages and visible rows. It caches Unicode glyphs at the current display DPI
+and uploads the atlas before text batching, preventing a later glyph from
+invalidating earlier draws. Prepare only visible content during play; startup
+can prepare the known UI character set and sizes together.
+
 - [Module and integration guide](MACROQUAD_TOOLKIT.md): ownership, module index,
   data loading, rendering, saves, networking and the capture harness.
 - [Shared settings](docs/SETTINGS.md): settings editing, display previews, audio,

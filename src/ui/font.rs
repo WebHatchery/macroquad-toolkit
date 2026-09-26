@@ -116,6 +116,48 @@ pub fn ensure_default_ui_font() -> Result<(), String> {
     Ok(())
 }
 
+/// Prepare an explicit font for the Unicode text that will be drawn this frame.
+///
+/// Call once per font before queuing any visible draws with that font. Include
+/// every text/size pair that can add glyphs this frame, including newly entered
+/// names and visible collection rows. Sizes are the `TextParams::font_size`
+/// values; measurement applies Macroquad's current display DPI automatically.
+///
+/// All glyphs are cached before one transparent glyph uploads the final atlas.
+/// This prevents atlas growth from deleting a texture referenced by earlier
+/// batched text. Preparing more text with this font after visible drawing has
+/// begun is unsafe for the same reason. No extra frame or UI draw pass is needed.
+///
+/// This prepares existing font glyphs; it does not add fallback font coverage.
+pub fn prepare_font_text(font: &Font, samples: &[(u16, &str)]) {
+    cache_font_text(font, samples);
+    if let Some((size, text)) = samples
+        .iter()
+        .find(|(size, text)| *size > 0 && !text.is_empty())
+    {
+        let glyph = text.chars().next().expect("nonempty text").to_string();
+        draw_text_ex(
+            &glyph,
+            -2_000.0,
+            -2_000.0,
+            TextParams {
+                font: Some(font),
+                font_size: *size,
+                color: BLANK,
+                ..Default::default()
+            },
+        );
+    }
+}
+
+fn cache_font_text(font: &Font, samples: &[(u16, &str)]) {
+    for (size, text) in samples.iter().copied().filter(|(size, _)| *size > 0) {
+        // populate_font_cache takes physical pixels; measure_text matches the
+        // DPI conversion used by draw_text_ex and avoids a second glyph set.
+        measure_text(text, Some(font), size, 1.0);
+    }
+}
+
 /// Populate the custom UI font atlas before a text-heavy frame is batched.
 ///
 /// Macroquad adds custom-font glyphs lazily. If an atlas grows midway through a
@@ -131,8 +173,9 @@ pub fn prewarm_default_ui_font(sizes: &[u16]) -> Result<(), String> {
     characters.extend(" -+/$|'?_<>;=~%#&@!…—–×⚙".chars());
     characters.sort_unstable();
     characters.dedup();
+    let text: String = characters.into_iter().collect();
     for size in sizes.iter().copied().filter(|size| *size > 0) {
-        font.populate_font_cache(&characters, size);
+        cache_font_text(font, &[(size, &text)]);
     }
     Ok(())
 }
@@ -146,12 +189,7 @@ pub fn prewarm_default_ui_font_text(samples: &[(u16, &str)]) -> Result<(), Strin
     let Some(font) = registered_default_ui_font() else {
         return Ok(());
     };
-    for (size, text) in samples.iter().copied().filter(|(size, _)| *size > 0) {
-        let mut characters: Vec<char> = text.chars().collect();
-        characters.sort_unstable();
-        characters.dedup();
-        font.populate_font_cache(&characters, size);
-    }
+    cache_font_text(font, samples);
     Ok(())
 }
 
