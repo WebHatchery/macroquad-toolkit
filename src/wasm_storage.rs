@@ -8,6 +8,72 @@ extern "C" {
     fn storage_get_extern(key: JsObject) -> JsObject;
     fn storage_remove_extern(key: JsObject);
     fn storage_exists_extern(key: JsObject) -> bool;
+    fn storage_read_checked_extern(key: JsObject) -> JsObject;
+    fn storage_remove_checked_extern(key: JsObject) -> JsObject;
+    fn storage_lock_request_extern(name: JsObject) -> u32;
+    fn storage_lock_poll_extern(id: u32) -> JsObject;
+    fn storage_lock_release_extern(id: u32);
+}
+
+#[derive(serde::Deserialize)]
+struct CheckedStorage {
+    value: Option<String>,
+    error: Option<String>,
+}
+
+fn response<T: serde::de::DeserializeOwned>(value: JsObject) -> Result<T, String> {
+    if value.is_nil() {
+        return Err("Browser storage returned no checked response".into());
+    }
+    let mut json = String::new();
+    value.to_string(&mut json);
+    serde_json::from_str(&json).map_err(|error| format!("Browser storage response: {error}"))
+}
+
+/// Distinguishes an absent key from blocked or otherwise unreadable storage.
+pub fn storage_read_checked(key: &str) -> Result<Option<String>, String> {
+    let result: CheckedStorage =
+        response(unsafe { storage_read_checked_extern(JsObject::string(key)) })?;
+    match result.error {
+        Some(error) => Err(format!("Browser storage read: {error}")),
+        None => Ok(result.value),
+    }
+}
+
+/// Idempotent deletion with an observable failure result.
+pub fn storage_remove_checked(key: &str) -> Result<(), String> {
+    let result: CheckedStorage =
+        response(unsafe { storage_remove_checked_extern(JsObject::string(key)) })?;
+    match result.error {
+        Some(error) => Err(format!("Browser storage removal: {error}")),
+        None => Ok(()),
+    }
+}
+
+/// Starts an asynchronous exclusive lease. Poll it in later frames.
+pub(crate) fn request_writer(name: &str) -> u32 {
+    unsafe { storage_lock_request_extern(JsObject::string(name)) }
+}
+
+pub(crate) fn poll_writer(id: u32) -> Result<super::persistence::WriterStatus, String> {
+    #[derive(serde::Deserialize)]
+    struct Lease {
+        status: String,
+        error: Option<String>,
+    }
+    let lease: Lease = response(unsafe { storage_lock_poll_extern(id) })?;
+    match lease.status.as_str() {
+        "pending" => Ok(super::persistence::WriterStatus::Pending),
+        "ready" => Ok(super::persistence::WriterStatus::Ready),
+        "busy" => Ok(super::persistence::WriterStatus::Busy),
+        _ => Err(lease
+            .error
+            .unwrap_or_else(|| "Save writer lease failed".into())),
+    }
+}
+
+pub(crate) fn release_writer(id: u32) {
+    unsafe { storage_lock_release_extern(id) };
 }
 
 /// Version handshake for the named miniquad storage browser plugin.

@@ -35,6 +35,8 @@ and optional networking; compiling the library does not install a web host.
   data loading, rendering, saves, networking and the capture harness.
 - [Shared settings](docs/SETTINGS.md): settings editing, display previews, audio,
   accessible controls and camera integration.
+- [Indexed saves](docs/INDEXED_SAVES.md): unlimited save discovery, exclusive
+  writer leases, interrupted-write recovery and injected storage failures.
 - [Artwork](docs/ARTWORK.md): bundled assets, loading paths and delivery requirements.
 - [Concept art](concept_art/README.md): non-runtime visual references.
 - [Coding standards](CODE_STANDARDS.md) and [agent instructions](AGENTS.md):

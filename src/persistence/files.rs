@@ -43,15 +43,19 @@ pub fn save_string_atomic<P: AsRef<Path>>(path: P, content: &str) -> Result<(), 
         .unwrap_or("save");
     let tmp_path = path.with_file_name(format!(".{}.tmp", file_name));
 
-    fs::write(&tmp_path, content).map_err(|e| format!("Temp write error: {}", e))?;
-
-    #[cfg(windows)]
-    {
-        if path.exists() {
-            fs::remove_file(path).map_err(|e| format!("Replace remove error: {}", e))?;
-        }
+    use std::io::Write;
+    let staged = (|| {
+        let mut file = fs::File::create(&tmp_path)?;
+        file.write_all(content.as_bytes())?;
+        file.sync_all()
+    })();
+    if let Err(error) = staged {
+        let _ = fs::remove_file(&tmp_path);
+        return Err(format!("Temp write error: {error}"));
     }
 
+    // `rename` replaces an existing file on Windows too. Removing it first
+    // introduces a crash window in which the last committed save is lost.
     fs::rename(&tmp_path, path).map_err(|e| {
         let _ = fs::remove_file(&tmp_path);
         format!("Replace error: {}", e)
