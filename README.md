@@ -31,6 +31,12 @@ and optional networking; compiling the library does not install a web host.
 
 ## Documentation
 
+`ui::text_entry` provides single-line Unicode edits and a visible keyboard with
+lowercase, uppercase, numbers, punctuation, Space, Backspace and Clear. Games
+own the text and draw the returned keys in their own style; edits apply through
+the action dispatcher. Every key is at least 48 logical pixels. The optional
+physical-input reader drains stale typing while the editor is unfocused.
+
 - [Module and integration guide](MACROQUAD_TOOLKIT.md): ownership, module index,
   data loading, rendering, saves, networking and the capture harness.
 - [Shared settings](docs/SETTINGS.md): settings editing, display previews, audio,

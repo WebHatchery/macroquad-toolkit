@@ -15,6 +15,7 @@ mod pseudo;
 mod scale;
 mod scroll_tabs;
 mod surfaces;
+pub mod text_entry;
 mod widgets;
 
 pub use bounds::{
