@@ -31,6 +31,9 @@
 //!
 //!     if let Some(configs) = capture::CaptureConfig::all_from_env("MYGAME") {
 //!         for config in configs {
+//!             capture::prepare_capture_surface(&config.prefix)
+//!                 .await
+//!                 .expect("capture surface must match the requested size");
 //!             game.begin_capture_scene(&config.scene);
 //!             capture::run_capture_once(&config, |dt| {
 //!                 game.update(dt);
@@ -51,6 +54,10 @@ pub mod filmstrip;
 pub mod headless;
 
 use macroquad::prelude::*;
+
+#[cfg(target_os = "windows")]
+static CAPTURE_SURFACE_REPORTED: std::sync::atomic::AtomicBool =
+    std::sync::atomic::AtomicBool::new(false);
 
 /// Capture parameters read from `PREFIX_CAPTURE_*` env vars.
 #[derive(Debug, Clone)]
@@ -154,6 +161,108 @@ pub fn capture_window_conf(
     }
 }
 
+/// Resolve requested capture client dimensions, using the live framebuffer size
+/// when either window override is absent or invalid. Non-positive results fail.
+pub fn capture_surface_size(prefix: &str, fallback: (i32, i32)) -> Result<(i32, i32), String> {
+    let width = env_i32(&format!("{prefix}_WINDOW_WIDTH"), fallback.0);
+    let height = env_i32(&format!("{prefix}_WINDOW_HEIGHT"), fallback.1);
+    if width <= 0 || height <= 0 {
+        return Err(format!(
+            "invalid capture client size {width}x{height}; width and height must be positive"
+        ));
+    }
+    Ok((width, height))
+}
+
+/// Prepare the native capture client at the requested window dimensions.
+///
+/// Headless mode hides the process-owned window; resizing uses non-activating Win32
+/// positioning and waits at most three rendered frames for Macroquad to report
+/// the exact client size. Browser builds do not have a native window and return
+/// successfully without doing anything.
+pub async fn prepare_capture_surface(prefix: &str) -> Result<(), String> {
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = prefix;
+        return Ok(());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        // Fullscreen capture uses the display framebuffer, not windowed overrides.
+        if env_bool(&format!("{prefix}_CAPTURE_FULLSCREEN"), false) {
+            return Ok(());
+        }
+        let fallback = (
+            screen_width().round() as i32,
+            screen_height().round() as i32,
+        );
+        let (width, height) = capture_surface_size(prefix, fallback)?;
+
+        #[cfg(target_os = "windows")]
+        let headless_mode = headless::headless_requested(prefix);
+        #[cfg(target_os = "windows")]
+        let resize_diagnostic = {
+            if headless_mode {
+                headless::hide_window();
+            }
+            headless::resize_window_client(width, height, headless_mode)?
+        };
+
+        #[cfg(not(target_os = "windows"))]
+        if (
+            screen_width().round() as i32,
+            screen_height().round() as i32,
+        ) != (width, height)
+        {
+            return Err(format!(
+                "native client resize to {width}x{height} is unsupported on this platform"
+            ));
+        }
+
+        for _ in 0..3 {
+            if (
+                screen_width().round() as i32,
+                screen_height().round() as i32,
+            ) == (width, height)
+            {
+                #[cfg(target_os = "windows")]
+                if headless_mode
+                    && !CAPTURE_SURFACE_REPORTED.swap(true, std::sync::atomic::Ordering::Relaxed)
+                {
+                    let native = headless::window_size_report().unwrap_or_else(|error| error);
+                    println!(
+                        "capture client verified: Macroquad {}x{}; Win32 {native}; resize {resize_diagnostic}",
+                        width, height
+                    );
+                }
+                return Ok(());
+            }
+            next_frame().await;
+        }
+
+        let actual = (
+            screen_width().round() as i32,
+            screen_height().round() as i32,
+        );
+        if actual == (width, height) {
+            Ok(())
+        } else {
+            #[cfg(target_os = "windows")]
+            let diagnostic = format!(
+                "; Win32 after 3 frames [{}]; resize [{resize_diagnostic}]",
+                headless::window_size_report().unwrap_or_else(|error| error)
+            );
+            #[cfg(not(target_os = "windows"))]
+            let diagnostic = String::new();
+            Err(format!(
+                "capture client resize did not settle: requested {width}x{height}, got {}x{} after 3 frames{diagnostic}",
+                actual.0, actual.1
+            ))
+        }
+    }
+}
+
 /// Screenshot harness loop for one scene: call `frame(timestep)` (your update +
 /// draw) a fixed number of times and write its PNG without exiting the process.
 ///
@@ -163,6 +272,9 @@ pub async fn run_capture_once<F: FnMut(f32)>(config: &CaptureConfig, mut frame: 
     // No-op when `window_conf` already armed it; the safety net for a game that
     // builds its `Conf` by hand and never called `capture_window_conf`.
     headless::arm(&config.prefix);
+    prepare_capture_surface(&config.prefix)
+        .await
+        .unwrap_or_else(|error| panic!("cannot prepare capture surface: {error}"));
 
     // Games commonly load a persisted windowed preference after `Conf` has
     // created the window. Reassert capture fullscreen after game startup and
