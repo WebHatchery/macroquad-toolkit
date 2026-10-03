@@ -72,24 +72,38 @@ impl AssetManager {
         Ok(())
     }
 
+    /// Load owned encoded bytes from the first matching asset pack or loose path.
+    ///
+    /// The bytes are returned to the caller and are not retained by the manager.
+    pub async fn load_bytes(&self, path: &str) -> Result<Vec<u8>, String> {
+        self.read_encoded_bytes(path)
+            .await
+            .map_err(|error| format!("Failed to load asset bytes '{}': {}", path, error))
+    }
+
     /// Decode an image from a loaded pack or loose path without uploading a texture.
     ///
     /// The returned Macroquad image owns its decoded RGBA bytes. Callers can process
     /// the pixels on the CPU and upload only a completed image when needed.
     pub async fn load_image(&self, path: &str) -> Result<Image, String> {
-        for pack in &self.asset_packs {
-            if pack.contains(path) {
-                return pack
-                    .image(path, None)
-                    .map_err(|error| format!("Failed to load image '{}': {}", path, error));
-            }
-        }
-
-        let bytes = macroquad::file::load_file(path)
+        let bytes = self
+            .read_encoded_bytes(path)
             .await
             .map_err(|error| format!("Failed to load image '{}': {}", path, error))?;
         decode_image_bytes(&bytes, None)
             .map_err(|error| format!("Failed to load image '{}': {}", path, error))
+    }
+
+    async fn read_encoded_bytes(&self, path: &str) -> Result<Vec<u8>, String> {
+        for pack in &self.asset_packs {
+            if let Some(bytes) = pack.bytes(path) {
+                return Ok(bytes.to_vec());
+            }
+        }
+
+        macroquad::file::load_file(path)
+            .await
+            .map_err(|error| error.to_string())
     }
 
     /// Load multiple textures at once
