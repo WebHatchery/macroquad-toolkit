@@ -72,6 +72,26 @@ impl AssetManager {
         Ok(())
     }
 
+    /// Decode an image from a loaded pack or loose path without uploading a texture.
+    ///
+    /// The returned Macroquad image owns its decoded RGBA bytes. Callers can process
+    /// the pixels on the CPU and upload only a completed image when needed.
+    pub async fn load_image(&self, path: &str) -> Result<Image, String> {
+        for pack in &self.asset_packs {
+            if pack.contains(path) {
+                return pack
+                    .image(path, None)
+                    .map_err(|error| format!("Failed to load image '{}': {}", path, error));
+            }
+        }
+
+        let bytes = macroquad::file::load_file(path)
+            .await
+            .map_err(|error| format!("Failed to load image '{}': {}", path, error))?;
+        decode_image_bytes(&bytes, None)
+            .map_err(|error| format!("Failed to load image '{}': {}", path, error))
+    }
+
     /// Load multiple textures at once
     ///
     /// Each tuple should be (name, path). Returns the number of successfully loaded textures.
@@ -307,6 +327,15 @@ impl AssetPack {
             .map_err(|e| format!("Failed to decode asset pack texture '{}': {}", path, e))
     }
 
+    /// Decode an image from an entry without creating a GPU texture.
+    pub fn image(&self, path: &str, format: Option<ImageFormat>) -> Result<Image, String> {
+        let bytes = self
+            .bytes(path)
+            .ok_or_else(|| format!("Asset pack entry not found: {}", path))?;
+        decode_image_bytes(bytes, format)
+            .map_err(|error| format!("Failed to decode asset pack image '{}': {}", path, error))
+    }
+
     /// Check if the pack contains an entry.
     pub fn contains(&self, path: &str) -> bool {
         self.files.contains_key(&normalize_asset_pack_path(path))
@@ -345,33 +374,44 @@ fn is_jpeg(bytes: &[u8]) -> bool {
 
 /// Decode image bytes into a texture, transparently handling JPEG.
 ///
-/// Macroquad compiles `image` with only the `png` and `tga` decoders, so JPEG bytes fail in
-/// `Image::from_file_with_format`. JPEG is detected by magic bytes and decoded separately; every
-/// other format keeps going through Macroquad so existing behaviour is unchanged.
-///
-/// An explicit `format` is honoured as-is and skips the JPEG path.
+/// Macroquad compiles `image` with PNG and TGA support; this crate additionally
+/// enables JPEG decoding. An explicit `format` is honored as supplied.
 pub fn decode_texture_bytes(
     bytes: &[u8],
     filter: FilterMode,
     format: Option<ImageFormat>,
 ) -> Result<Texture2D, String> {
-    let texture = if format.is_none() && is_jpeg(bytes) {
-        let decoded = image::load_from_memory_with_format(bytes, image::ImageFormat::Jpeg)
-            .map_err(|e| format!("Failed to decode JPEG: {}", e))?
-            .to_rgba8();
-        Texture2D::from_rgba8(
-            u16::try_from(decoded.width()).map_err(|_| "JPEG width exceeds 65535".to_string())?,
-            u16::try_from(decoded.height()).map_err(|_| "JPEG height exceeds 65535".to_string())?,
-            &decoded,
-        )
-    } else {
-        let image = Image::from_file_with_format(bytes, format)
-            .map_err(|e| format!("Failed to decode image: {}", e))?;
-        Texture2D::from_image(&image)
-    };
-
+    let image = decode_image_bytes(bytes, format)?;
+    let texture = Texture2D::from_image(&image);
     texture.set_filter(filter);
     Ok(texture)
+}
+
+/// Decode encoded image bytes to a CPU-side Macroquad image without GPU upload.
+///
+/// JPEG is detected by its magic bytes when no explicit format is supplied;
+/// other formats use the enabled `image` decoders, including PNG and TGA.
+pub fn decode_image_bytes(bytes: &[u8], format: Option<ImageFormat>) -> Result<Image, String> {
+    let decoded = if format.is_none() && is_jpeg(bytes) {
+        image::load_from_memory_with_format(bytes, image::ImageFormat::Jpeg)
+    } else if let Some(format) = format {
+        image::load_from_memory_with_format(bytes, format)
+    } else {
+        image::load_from_memory(bytes)
+    }
+    .map_err(|error| format!("Failed to decode image: {}", error))?
+    .to_rgba8();
+
+    let width = u16::try_from(decoded.width())
+        .map_err(|_| "Image width exceeds Macroquad's 65535 pixel limit".to_string())?;
+    let height = u16::try_from(decoded.height())
+        .map_err(|_| "Image height exceeds Macroquad's 65535 pixel limit".to_string())?;
+
+    Ok(Image {
+        bytes: decoded.into_raw(),
+        width,
+        height,
+    })
 }
 
 /// Load a texture from a loose file path, transparently handling JPEG.

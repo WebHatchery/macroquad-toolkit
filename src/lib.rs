@@ -62,6 +62,7 @@ pub mod crash;
 pub mod debug;
 pub mod events;
 pub mod fx;
+pub mod image_composition;
 pub mod input;
 pub mod math;
 #[cfg(feature = "net")]
