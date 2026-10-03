@@ -36,6 +36,8 @@ param(
     # Optional JSON report describing the captured process and its sampled
     # working-set distribution. Relative paths resolve from GameDir.
     [string]$ProcessReportPath,
+    # Shows successful child stdout on the information stream when requested.
+    [switch]$ShowOutput,
     # On Windows, also samples the process-scoped GPU Process Memory and 3D
     # engine performance counters. Counter availability is reported rather
     # than assumed; this diagnostic does not impose a GPU threshold.
@@ -272,6 +274,11 @@ try {
                 if (Test-Path -LiteralPath $stderrPath) { Get-Content -LiteralPath $stderrPath -Tail 40 }
             ) -join "`n"
             throw "Capture process exited with code $($proc.ExitCode).`n$details"
+        }
+        if ($ShowOutput) {
+            Get-Content -LiteralPath $stdoutPath | ForEach-Object {
+                Write-Information $_ -InformationAction Continue
+            }
         }
         if ($ProcessReportPath) {
             $workingSetValues = [long[]]$workingSetSamples.ToArray()
